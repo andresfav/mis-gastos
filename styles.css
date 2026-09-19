@@ -1,0 +1,1030 @@
+* {
+    box-sizing: border-box;
+}
+
+
+:root {
+    font-family:
+        Inter,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+
+    color: #1f2937;
+    background: #f3f4f6;
+
+    font-synthesis: none;
+}
+
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    background: #f3f4f6;
+}
+
+
+main {
+    width: min(100% - 24px, 900px);
+    margin: 0 auto;
+    padding: 24px 0 110px;
+}
+
+
+h1 {
+    margin: 0 0 20px;
+    font-size: 1.8rem;
+}
+
+
+h2 {
+    margin-top: 0;
+    font-size: 1.2rem;
+}
+
+
+h3 {
+    margin-bottom: 10px;
+}
+
+
+section {
+    margin-bottom: 18px;
+}
+
+
+#login-section,
+#dashboard-section,
+#monthly-evolution-section,
+#category-budgets-section,
+#recent-expenses-section,
+#budget-settings-section,
+#expense-section,
+#history-section {
+    background: white;
+    border-radius: 16px;
+    padding: 18px;
+    box-shadow:
+        0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+
+#user-info {
+    margin-top: -12px;
+    margin-bottom: 20px;
+    color: #6b7280;
+    font-size: 0.9rem;
+}
+
+
+/* =========================
+   DASHBOARD
+   ========================= */
+
+#dashboard-section {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+
+
+#dashboard-section h2 {
+    grid-column: 1 / -1;
+    text-transform: capitalize;
+    margin-bottom: 4px;
+}
+
+
+#dashboard-section p {
+    margin: 0;
+    padding: 12px;
+    background: #f9fafb;
+    border-radius: 12px;
+    font-size: 0.85rem;
+}
+
+
+#dashboard-section strong {
+    display: block;
+    margin-top: 5px;
+    font-size: 1.15rem;
+}
+
+
+#budget-progress {
+    grid-column: 1 / -1;
+}
+
+
+/* =========================
+   PROGRESS BARS
+   ========================= */
+
+progress {
+    width: 100%;
+    height: 14px;
+
+    border: none;
+    border-radius: 999px;
+
+    overflow: hidden;
+
+    accent-color: #2563eb;
+}
+
+progress.over-budget {
+    accent-color: #dc2626;
+}
+
+
+.negative-value {
+    color: #dc2626;
+}
+
+
+/* =========================
+   FORMS
+   ========================= */
+
+form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+
+label {
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+
+input,
+select,
+textarea {
+    width: 100%;
+
+    padding: 11px 12px;
+
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+
+    background: white;
+
+    font: inherit;
+
+    transition:
+        border-color 0.15s,
+        box-shadow 0.15s;
+}
+
+
+textarea {
+    min-height: 85px;
+    resize: vertical;
+}
+
+
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+
+    border-color: #2563eb;
+
+    box-shadow:
+        0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+
+/* Checkbox */
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    font-weight: 500;
+}
+
+
+.checkbox-label input {
+    width: auto;
+}
+
+
+/* =========================
+   BUTTONS
+   ========================= */
+
+button {
+    border: none;
+    border-radius: 10px;
+
+    padding: 10px 14px;
+
+    background: #2563eb;
+    color: white;
+
+    font: inherit;
+    font-weight: 600;
+
+    cursor: pointer;
+
+    transition:
+        transform 0.1s,
+        opacity 0.1s;
+}
+
+
+button:hover {
+    opacity: 0.9;
+}
+
+
+button:active {
+    transform: scale(0.98);
+}
+
+
+.secondary-button {
+    background: #e5e7eb;
+    color: #1f2937;
+}
+
+
+.danger-button {
+    background: #dc2626;
+}
+
+
+/* =========================
+   ÚLTIMOS GASTOS
+   ========================= */
+
+.section-toggle {
+    width: 100%;
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    padding: 0;
+
+    background: transparent;
+    color: #1f2937;
+
+    font-size: 1.2rem;
+    text-align: left;
+}
+
+
+.section-toggle:hover {
+    background: transparent;
+    opacity: 0.8;
+}
+
+
+#recent-expenses-content {
+    margin-top: 16px;
+}
+
+#category-budgets-content {
+    margin-top: 16px;
+}
+
+#history-filters-toggle {
+    width: 100%;
+
+    margin-top: 18px;
+    margin-bottom: 18px;
+
+    padding: 12px 14px;
+
+    background: #eff6ff;
+
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+
+    color: #1f2937;
+}
+
+#history-filters-toggle[aria-expanded="true"] {
+    background: #dbeafe;
+
+    border-color: #93c5fd;
+}
+
+#history-filters-toggle:hover {
+    background: #dbeafe;
+
+    opacity: 1;
+}
+
+#history-filters-content {
+    margin-top: 16px;
+}
+
+#recent-expenses-table {
+    width: 100%;
+    min-width: 520px;
+
+    border-collapse: collapse;
+
+    font-size: 0.9rem;
+}
+
+
+#recent-expenses-table th,
+#recent-expenses-table td {
+    padding: 10px;
+
+    text-align: left;
+
+    border-bottom:
+        1px solid #e5e7eb;
+}
+
+
+#recent-expenses-table th {
+    color: #6b7280;
+    font-size: 0.8rem;
+}
+
+
+#recent-expenses-table td:nth-child(2) {
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+
+#recent-expenses-content
+#view-all-expenses-button {
+    margin-top: 14px;
+}
+
+
+/* =========================
+   HISTORIAL
+   ========================= */
+
+#expense-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+
+.expense-card {
+    padding: 14px;
+
+    background: #f9fafb;
+
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+}
+
+
+.expense-card strong {
+    display: block;
+    font-size: 1rem;
+    margin-bottom: 5px;
+}
+
+
+.expense-card p {
+    margin: 4px 0;
+    color: #6b7280;
+    font-size: 0.9rem;
+}
+
+
+.expense-card button {
+    margin-top: 10px;
+    margin-right: 8px;
+}
+
+
+/* =========================
+   TABLA DE HISTORIAL
+   ========================= */
+
+.history-header {
+    display: flex;
+
+    justify-content: space-between;
+    align-items: center;
+
+    gap: 12px;
+
+    margin-bottom: 8px;
+}
+
+
+.history-header h2 {
+    margin: 0;
+}
+
+
+#export-expenses-button {
+    padding: 6px 10px;
+
+    font-size: 0.75rem;
+
+    white-space: nowrap;
+}
+
+#history-filters {
+    display: grid;
+    grid-template-columns:
+        repeat(2, minmax(0, 1fr));
+
+    gap: 12px;
+
+    margin-bottom: 18px;
+}
+
+
+.filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+
+.filter-search {
+    grid-column: 1 / -1;
+}
+
+
+#clear-history-filters {
+    align-self: end;
+}
+
+
+#history-summary {
+    display: grid;
+
+    grid-template-columns:
+        repeat(3, 1fr);
+
+    gap: 10px;
+
+    margin-bottom: 18px;
+    margin-top: 18px;
+}
+
+
+#history-summary > div {
+    padding: 12px;
+
+    background: #f9fafb;
+
+    border-radius: 10px;
+}
+
+
+#history-summary span {
+    display: block;
+
+    margin-bottom: 4px;
+
+    color: #6b7280;
+
+    font-size: 0.8rem;
+}
+
+
+#history-summary strong {
+    font-size: 1rem;
+}
+
+.table-container {
+    width: 100%;
+    overflow-x: auto;
+}
+
+
+#expense-table {
+    width: 100%;
+    min-width: 850px;
+
+    border-collapse: collapse;
+
+    font-size: 0.9rem;
+}
+
+
+.table-sort-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+
+    padding: 0;
+
+    background: transparent;
+    color: inherit;
+
+    font-size: inherit;
+    font-weight: 700;
+
+    white-space: nowrap;
+}
+
+
+.table-sort-button:hover {
+    background: transparent;
+    color: #2563eb;
+    opacity: 1;
+}
+
+
+.table-sort-button:active {
+    transform: none;
+}
+
+
+.sort-indicator {
+    min-width: 12px;
+
+    color: #2563eb;
+
+    font-size: 0.9rem;
+}
+
+
+#expense-table th,
+#expense-table td {
+    padding: 11px 10px;
+
+    text-align: left;
+
+    border-bottom:
+        1px solid #e5e7eb;
+
+    vertical-align: middle;
+}
+
+
+#expense-table th {
+    background: #f9fafb;
+
+    font-size: 0.8rem;
+    color: #6b7280;
+
+    position: sticky;
+    top: 0;
+}
+
+
+#expense-table tbody tr:hover {
+    background: #f9fafb;
+}
+
+
+#expense-table th:nth-child(2),
+#expense-table td:nth-child(2) {
+    text-align: right;
+}
+
+
+#expense-table td:nth-child(2) {
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+
+.table-button {
+    padding: 7px 9px;
+    margin: 2px;
+
+    font-size: 0.8rem;
+}
+
+
+/* =========================
+   PRESUPUESTOS
+   ========================= */
+
+#currency-settings {
+    margin-bottom: 24px;
+
+    padding-bottom: 20px;
+
+    border-bottom:
+        1px solid #e5e7eb;
+}
+
+
+#budget-copy-actions {
+    margin-bottom: 22px;
+}
+
+
+#copy-previous-budget-button {
+    width: 100%;
+}
+
+
+#currency-settings label {
+    display: block;
+
+    margin-bottom: 6px;
+}
+
+
+.field-help {
+    margin: 6px 0 0;
+
+    color: #6b7280;
+
+    font-size: 0.8rem;
+}
+
+
+#category-budget-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+
+.budget-card {
+    padding: 12px 0;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+
+.budget-card:last-child {
+    border-bottom: none;
+}
+
+
+.budget-card h3 {
+    margin: 0 0 4px;
+}
+
+
+.budget-card p {
+    margin: 4px 0 8px;
+    color: #6b7280;
+}
+
+
+#category-budget-inputs {
+    display: grid;
+    gap: 12px;
+}
+
+
+.budget-input-row {
+    display: grid;
+    grid-template-columns: 1fr 120px;
+    gap: 12px;
+    align-items: center;
+}
+
+
+.budget-input-row input {
+    text-align: right;
+}
+
+
+/* =========================
+   GRÁFICO
+   ========================= */
+
+#monthly-evolution-section {
+    min-height: 300px;
+}
+
+
+#monthly-spending-chart {
+    width: 100% !important;
+    max-height: 320px;
+}
+
+
+/* =========================
+   MENSAJES
+   ========================= */
+
+#expense-message,
+#budget-message,
+#login-message {
+    min-height: 20px;
+    font-size: 0.9rem;
+}
+
+
+/* =========================
+   VISTAS Y NAVEGACIÓN
+   ========================= */
+
+.app-view[hidden] {
+    display: none !important;
+}
+
+
+.bottom-nav {
+    position: fixed;
+
+    left: 50%;
+    bottom: 12px;
+
+    transform: translateX(-50%);
+
+    width: min(
+        calc(100% - 24px),
+        600px
+    );
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(4, 1fr);
+
+    gap: 6px;
+
+    padding: 7px;
+
+    background:
+        rgba(255, 255, 255, 0.96);
+
+    border:
+        1px solid #e5e7eb;
+
+    border-radius: 18px;
+
+    box-shadow:
+        0 8px 30px
+        rgba(0, 0, 0, 0.14);
+
+    z-index: 1000;
+}
+
+
+.nav-button {
+    padding: 10px 5px;
+
+    background: transparent;
+
+    color: #6b7280;
+
+    font-size: 0.8rem;
+}
+
+
+.nav-button:hover {
+    background: #f3f4f6;
+}
+
+
+.nav-button.active {
+    background: #eff6ff;
+    color: #2563eb;
+}
+
+
+.nav-add-button {
+    background: #2563eb;
+    color: white;
+}
+
+
+.nav-add-button:hover {
+    background: #2563eb;
+}
+
+
+.nav-add-button.active {
+    background: #1d4ed8;
+    color: white;
+}
+
+/* =========================
+   DESKTOP
+   ========================= */
+
+@media (min-width: 700px) {
+
+    main {
+        padding-top: 40px;
+    }
+
+
+    #expense-form {
+        display: grid;
+        grid-template-columns:
+            repeat(2, minmax(0, 1fr));
+        gap: 14px;
+    }
+
+
+    #expense-form label,
+    #expense-form input,
+    #expense-form select,
+    #expense-form textarea {
+        grid-column: auto;
+    }
+
+
+    #expense-form textarea,
+    #expense-form button,
+    #expense-message,
+    .checkbox-label {
+        grid-column: 1 / -1;
+    }
+
+
+    #category-budget-inputs {
+        grid-template-columns:
+            repeat(2, minmax(0, 1fr));
+    }
+
+    #copy-previous-budget-button {
+        width: auto;
+    }
+}
+
+
+/* =========================
+   MÓVIL
+   ========================= */
+
+@media (max-width: 550px) {
+
+    main {
+        width: min(100% - 16px, 900px);
+        padding-top: 16px;
+    }
+
+
+    #dashboard-section {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+
+    #dashboard-section h2,
+    #budget-progress {
+        grid-column: 1 / -1;
+    }
+
+
+    #dashboard-section p {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
+
+        gap: 6px;
+
+        min-height: 72px;
+
+        font-size: 0.82rem;
+    }
+
+
+    #dashboard-section strong {
+        display: block;
+
+        margin: 0;
+
+        font-size: 1rem;
+        line-height: 1.15;
+
+        word-break: break-word;
+    }
+
+
+    .budget-input-row {
+        grid-template-columns: 1fr 105px;
+    }
+
+    #history-filters {
+        grid-template-columns: 1fr;
+    }
+
+
+    .filter-search {
+        grid-column: 1;
+    }
+
+
+    #history-summary {
+        grid-template-columns:
+            repeat(3, 1fr);
+
+        gap: 6px;
+    }
+
+    #history-summary > div {
+        padding: 9px 6px;
+        text-align: center;
+    }
+
+
+    #history-summary span {
+        font-size: 0.7rem;
+    }
+
+
+    #history-summary strong {
+        font-size: 0.9rem;
+    }
+
+    #expense-table {
+        min-width: 430px;
+    }
+
+    #expense-table th:nth-child(4),
+    #expense-table td:nth-child(4),
+    #expense-table th:nth-child(5),
+    #expense-table td:nth-child(5),
+    #expense-table th:nth-child(6),
+    #expense-table td:nth-child(6) {
+        display: none;
+    }
+
+    #expense-table th:nth-child(1),
+    #expense-table td:nth-child(1) {
+        width: 100px;
+        white-space: nowrap;
+    }
+
+
+    #expense-table th:nth-child(2),
+    #expense-table td:nth-child(2) {
+        width: 90px;
+    }
+
+
+    #expense-table th:nth-child(3),
+    #expense-table td:nth-child(3) {
+        width: 135px;
+    }
+
+
+    #expense-table th:nth-child(7),
+    #expense-table td:nth-child(7) {
+        width: 105px;
+    }
+
+    .table-button {
+        display: block;
+
+        width: 100%;
+
+        padding: 6px 7px;
+        margin: 3px 0;
+
+        font-size: 0.72rem;
+    }
+
+    #expense-table {
+        font-size: 0.82rem;
+    }
+
+
+    #expense-table th,
+    #expense-table td {
+        padding: 9px 7px;
+    }
+
+    #recent-expenses-table {
+        min-width: 360px;
+
+        font-size: 0.82rem;
+    }
+
+
+    #recent-expenses-table th:nth-child(4),
+    #recent-expenses-table td:nth-child(4) {
+        display: none;
+    }
+
+
+    #recent-expenses-table th,
+    #recent-expenses-table td {
+        padding: 9px 7px;
+    }
+
+    #expense-table th:first-child,
+    #expense-table td:first-child {
+        position: sticky;
+        left: 0;
+
+        background: white;
+
+        z-index: 2;
+    }
+
+
+    #expense-table th:first-child {
+        background: #f9fafb;
+
+        z-index: 3;
+    }
+}
