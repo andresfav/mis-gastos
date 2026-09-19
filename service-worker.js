@@ -1,5 +1,5 @@
 const CACHE_NAME =
-    "mis-gastos-v1";
+    "mis-gastos-v2";
 
 
 const APP_FILES = [

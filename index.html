@@ -75,7 +75,190 @@
 
             </form>
 
+            <button
+                id="show-register-button"
+                type="button"
+                class="secondary-button"
+            >
+                Crear cuenta
+            </button>
+
+            <button
+                id="forgot-password-button"
+                type="button"
+                class="secondary-button"
+            >
+                ¿Olvidaste tu contraseña?
+            </button>
+
             <p id="login-message"></p>
+
+            <div
+                id="register-container"
+                hidden
+            >
+
+                <h2>
+                    Crear cuenta
+                </h2>
+
+
+                <form id="register-form">
+
+                    <label for="register-email">
+                        Email
+                    </label>
+
+                    <input
+                        id="register-email"
+                        type="email"
+                        autocomplete="email"
+                        required
+                    >
+
+
+                    <label for="register-password">
+                        Contraseña
+                    </label>
+
+                    <input
+                        id="register-password"
+                        type="password"
+                        minlength="8"
+                        autocomplete="new-password"
+                        required
+                    >
+
+
+                    <label for="register-password-confirm">
+                        Repetir contraseña
+                    </label>
+
+                    <input
+                        id="register-password-confirm"
+                        type="password"
+                        minlength="8"
+                        autocomplete="new-password"
+                        required
+                    >
+
+
+                    <button type="submit">
+                        Crear cuenta
+                    </button>
+
+
+                    <button
+                        id="back-to-login-button"
+                        type="button"
+                        class="secondary-button"
+                    >
+                        Volver a iniciar sesión
+                    </button>
+
+                </form>
+
+
+                <p id="register-message"></p>
+
+            </div>
+
+            <div
+                id="forgot-password-container"
+                hidden
+            >
+
+                <h2>
+                    Recuperar contraseña
+                </h2>
+
+                <p>
+                    Introduce el email de tu cuenta y te enviaremos un enlace para crear una nueva contraseña.
+                </p>
+
+
+                <form id="forgot-password-form">
+
+                    <label for="forgot-password-email">
+                        Email
+                    </label>
+
+                    <input
+                        id="forgot-password-email"
+                        type="email"
+                        autocomplete="email"
+                        required
+                    >
+
+
+                    <button type="submit">
+                        Enviar enlace
+                    </button>
+
+
+                    <button
+                        id="back-from-forgot-password-button"
+                        type="button"
+                        class="secondary-button"
+                    >
+                        Volver a iniciar sesión
+                    </button>
+
+                </form>
+
+
+                <p id="forgot-password-message"></p>
+
+            </div>
+
+            <div
+                id="new-password-container"
+                hidden
+            >
+
+                <h2>
+                    Nueva contraseña
+                </h2>
+
+
+                <form id="new-password-form">
+
+                    <label for="new-recovery-password">
+                        Nueva contraseña
+                    </label>
+
+                    <input
+                        id="new-recovery-password"
+                        type="password"
+                        minlength="8"
+                        autocomplete="new-password"
+                        required
+                    >
+
+
+                    <label for="new-recovery-password-confirm">
+                        Repetir contraseña
+                    </label>
+
+                    <input
+                        id="new-recovery-password-confirm"
+                        type="password"
+                        minlength="8"
+                        autocomplete="new-password"
+                        required
+                    >
+
+
+                    <button type="submit">
+                        Guardar nueva contraseña
+                    </button>
+
+                </form>
+
+
+                <p id="new-password-message"></p>
+
+            </div>
 
         </section>
 
@@ -259,6 +442,88 @@
                         </p>
 
                     </div>
+
+                    <section id="payment-method-settings">
+
+                        <h3>
+                            Métodos de pago
+                        </h3>
+
+
+                        <form id="payment-method-form">
+
+                            <input
+                                id="new-payment-method"
+                                type="text"
+                                maxlength="60"
+                                placeholder="Ej. Visa CaixaBank"
+                                required
+                            >
+
+                            <button type="submit">
+                                Añadir
+                            </button>
+
+                        </form>
+
+
+                        <div id="payment-method-settings-list">
+                        </div>
+
+                        <button
+                            id="show-inactive-payment-methods-button"
+                            type="button"
+                            class="secondary-button"
+                            aria-expanded="false"
+                            hidden
+                        >
+                            Métodos eliminados
+                        </button>
+
+
+                        <div
+                            id="inactive-payment-method-settings-list"
+                            hidden
+                        >
+                        </div>
+
+                        <p id="payment-method-settings-message">
+                        </p>
+
+                    </section>
+
+                    <section id="account-settings">
+
+                        <h3>
+                            Seguridad
+                        </h3>
+
+
+                        <form id="password-form">
+
+                            <label for="new-password">
+                                Nueva contraseña
+                            </label>
+
+                            <input
+                                id="new-password"
+                                type="password"
+                                minlength="8"
+                                autocomplete="new-password"
+                                required
+                            >
+
+                            <button type="submit">
+                                Cambiar contraseña
+                            </button>
+
+                        </form>
+
+
+                        <p id="password-message">
+                        </p>
+
+                    </section>
 
                     <div id="budget-copy-actions">
 
@@ -709,7 +974,7 @@
                     type="button"
                     class="nav-button"
                 >
-                    Presupuestos
+                    Ajustes
                 </button>
 
             </nav>

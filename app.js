@@ -19,6 +19,101 @@ const appSection =
 const loginForm =
     document.getElementById("login-form");
 
+const showRegisterButton =
+    document.getElementById(
+        "show-register-button"
+    );
+
+const registerContainer =
+    document.getElementById(
+        "register-container"
+    );
+
+const registerForm =
+    document.getElementById(
+        "register-form"
+    );
+
+const registerEmail =
+    document.getElementById(
+        "register-email"
+    );
+
+const registerPassword =
+    document.getElementById(
+        "register-password"
+    );
+
+const registerPasswordConfirm =
+    document.getElementById(
+        "register-password-confirm"
+    );
+
+const registerMessage =
+    document.getElementById(
+        "register-message"
+    );
+
+const backToLoginButton =
+    document.getElementById(
+        "back-to-login-button"
+    );
+
+const forgotPasswordButton =
+    document.getElementById(
+        "forgot-password-button"
+    );
+
+const forgotPasswordContainer =
+    document.getElementById(
+        "forgot-password-container"
+    );
+
+const forgotPasswordForm =
+    document.getElementById(
+        "forgot-password-form"
+    );
+
+const forgotPasswordEmail =
+    document.getElementById(
+        "forgot-password-email"
+    );
+
+const forgotPasswordMessage =
+    document.getElementById(
+        "forgot-password-message"
+    );
+
+const backFromForgotPasswordButton =
+    document.getElementById(
+        "back-from-forgot-password-button"
+    );
+
+const newPasswordContainer =
+    document.getElementById(
+        "new-password-container"
+    );
+
+const newPasswordForm =
+    document.getElementById(
+        "new-password-form"
+    );
+
+const newRecoveryPassword =
+    document.getElementById(
+        "new-recovery-password"
+    );
+
+const newRecoveryPasswordConfirm =
+    document.getElementById(
+        "new-recovery-password-confirm"
+    );
+
+const newPasswordMessage =
+    document.getElementById(
+        "new-password-message"
+    );
+
 const expenseForm =
     document.getElementById("expense-form");
 
@@ -180,6 +275,51 @@ const copyPreviousBudgetButton =
 const currencySelect =
     document.getElementById(
         "currency-select"
+    );
+
+const paymentMethodForm =
+    document.getElementById(
+        "payment-method-form"
+    );
+
+const newPaymentMethodInput =
+    document.getElementById(
+        "new-payment-method"
+    );
+
+const paymentMethodSettingsList =
+    document.getElementById(
+        "payment-method-settings-list"
+    );
+
+const showInactivePaymentMethodsButton =
+    document.getElementById(
+        "show-inactive-payment-methods-button"
+    );
+
+const inactivePaymentMethodSettingsList =
+    document.getElementById(
+        "inactive-payment-method-settings-list"
+    );
+
+const paymentMethodSettingsMessage =
+    document.getElementById(
+        "payment-method-settings-message"
+    );
+
+const passwordForm =
+    document.getElementById(
+        "password-form"
+    );
+
+const newPasswordInput =
+    document.getElementById(
+        "new-password"
+    );
+
+const passwordMessage =
+    document.getElementById(
+        "password-message"
     );
 
 const homeView =
@@ -477,6 +617,43 @@ function showView(viewName) {
 }
 
 
+function showPasswordRecoveryScreen() {
+
+    appSection.hidden =
+        true;
+
+    loginSection.hidden =
+        false;
+
+
+    loginForm.hidden =
+        true;
+
+    showRegisterButton.hidden =
+        true;
+
+    forgotPasswordButton.hidden =
+        true;
+
+    loginMessage.hidden =
+        true;
+
+
+    registerContainer.hidden =
+        true;
+
+    forgotPasswordContainer.hidden =
+        true;
+
+
+    newPasswordContainer.hidden =
+        false;
+
+    newPasswordMessage.textContent =
+        "";
+}
+
+
 navHome.addEventListener(
     "click",
     () => {
@@ -744,6 +921,381 @@ exportExpensesButton.addEventListener(
 );
 
 
+forgotPasswordButton.addEventListener(
+    "click",
+    () => {
+
+        loginForm.hidden =
+            true;
+
+        showRegisterButton.hidden =
+            true;
+
+        forgotPasswordButton.hidden =
+            true;
+
+        loginMessage.hidden =
+            true;
+
+        registerContainer.hidden =
+            true;
+
+        newPasswordContainer.hidden =
+            true;
+
+
+        forgotPasswordContainer.hidden =
+            false;
+
+        forgotPasswordMessage.textContent =
+            "";
+    }
+);
+
+
+backFromForgotPasswordButton.addEventListener(
+    "click",
+    () => {
+
+        forgotPasswordContainer.hidden =
+            true;
+
+        newPasswordContainer.hidden =
+            true;
+
+        registerContainer.hidden =
+            true;
+
+
+        loginForm.hidden =
+            false;
+
+        showRegisterButton.hidden =
+            false;
+
+        forgotPasswordButton.hidden =
+            false;
+
+        loginMessage.hidden =
+            false;
+
+
+        forgotPasswordMessage.textContent =
+            "";
+    }
+);
+
+
+showRegisterButton.addEventListener(
+    "click",
+    () => {
+
+        loginForm.hidden =
+            true;
+
+        showRegisterButton.hidden =
+            true;
+        
+        forgotPasswordButton.hidden =
+            true;
+
+        loginMessage.hidden =
+            true;
+
+        registerContainer.hidden =
+            false;
+
+        registerMessage.textContent =
+            "";
+    }
+);
+
+
+backToLoginButton.addEventListener(
+    "click",
+    () => {
+
+        registerContainer.hidden =
+            true;
+
+        loginForm.hidden =
+            false;
+
+        showRegisterButton.hidden =
+            false;
+
+        forgotPasswordButton.hidden =
+            false;
+
+        loginMessage.hidden =
+            false;
+
+        registerMessage.textContent =
+            "";
+    }
+);
+
+
+registerForm.addEventListener(
+    "submit",
+    async (event) => {
+
+        event.preventDefault();
+
+
+        const email =
+            registerEmail.value
+                .trim();
+
+        const password =
+            registerPassword.value;
+
+        const passwordConfirm =
+            registerPasswordConfirm.value;
+
+
+        if (
+            password
+            !== passwordConfirm
+        ) {
+
+            registerMessage.textContent =
+                "Las contraseñas no coinciden.";
+
+            return;
+        }
+
+
+        if (
+            password.length < 8
+        ) {
+
+            registerMessage.textContent =
+                "La contraseña debe tener al menos 8 caracteres.";
+
+            return;
+        }
+
+
+        registerMessage.textContent =
+            "Creando cuenta...";
+
+
+        const redirectUrl =
+            window.location.origin
+            + window.location.pathname;
+
+
+        const {
+            data,
+            error
+        } =
+            await supabaseClient
+                .auth
+                .signUp({
+                    email:
+                        email,
+
+                    password:
+                        password,
+
+                    options: {
+                        emailRedirectTo:
+                            redirectUrl
+                    }
+                });
+
+
+        if (error) {
+
+            registerMessage.textContent =
+                "Error: "
+                + error.message;
+
+            return;
+        }
+
+
+        registerForm.reset();
+
+
+        if (data.session) {
+
+            registerMessage.textContent =
+                "";
+
+            await showApp(
+                data.user
+            );
+
+            return;
+        }
+
+
+        registerMessage.textContent =
+            "Cuenta creada. Revisa tu correo y confirma tu email antes de iniciar sesión.";
+    }
+);
+
+
+forgotPasswordForm.addEventListener(
+    "submit",
+    async (event) => {
+
+        event.preventDefault();
+
+
+        const email =
+            forgotPasswordEmail
+                .value
+                .trim();
+
+
+        const redirectUrl =
+            window.location.origin
+            + window.location.pathname
+            + "?recovery=1";
+
+
+        forgotPasswordMessage.textContent =
+            "Enviando enlace...";
+
+
+        const { error } =
+            await supabaseClient
+                .auth
+                .resetPasswordForEmail(
+                    email,
+                    {
+                        redirectTo:
+                            redirectUrl
+                    }
+                );
+
+
+        if (error) {
+
+            forgotPasswordMessage.textContent =
+                "Error: "
+                + error.message;
+
+            return;
+        }
+
+
+        forgotPasswordForm.reset();
+
+
+        forgotPasswordMessage.textContent =
+            "Si existe una cuenta asociada a ese email, recibirás un enlace para cambiar la contraseña.";
+    }
+);
+
+
+newPasswordForm.addEventListener(
+    "submit",
+    async (event) => {
+
+        event.preventDefault();
+
+
+        const password =
+            newRecoveryPassword.value;
+
+        const passwordConfirm =
+            newRecoveryPasswordConfirm.value;
+
+
+        if (
+            password
+            !== passwordConfirm
+        ) {
+
+            newPasswordMessage.textContent =
+                "Las contraseñas no coinciden.";
+
+            return;
+        }
+
+
+        if (
+            password.length < 8
+        ) {
+
+            newPasswordMessage.textContent =
+                "La contraseña debe tener al menos 8 caracteres.";
+
+            return;
+        }
+
+
+        newPasswordMessage.textContent =
+            "Actualizando contraseña...";
+
+
+        const { error } =
+            await supabaseClient
+                .auth
+                .updateUser({
+                    password:
+                        password
+                });
+
+
+        if (error) {
+
+            newPasswordMessage.textContent =
+                "Error: "
+                + error.message;
+
+            return;
+        }
+
+
+        newPasswordForm.reset();
+
+
+        await supabaseClient
+            .auth
+            .signOut();
+
+
+        window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname
+        );
+
+
+        newPasswordContainer.hidden =
+            true;
+
+        forgotPasswordContainer.hidden =
+            true;
+
+        registerContainer.hidden =
+            true;
+
+
+        loginForm.hidden =
+            false;
+
+        showRegisterButton.hidden =
+            false;
+
+        forgotPasswordButton.hidden =
+            false;
+
+        loginMessage.hidden =
+            false;
+
+
+        loginMessage.textContent =
+            "Contraseña actualizada. Ya puedes iniciar sesión con la nueva contraseña.";
+    }
+);
+
+
 loginForm.addEventListener("submit", async (event) => {
 
     event.preventDefault();
@@ -789,6 +1341,8 @@ async function showApp(user) {
     await loadCategories();
 
     await loadPaymentMethods();
+
+    await loadPaymentMethodSettings();
 
     await loadUserSettings();
 
@@ -934,6 +1488,288 @@ async function loadPaymentMethods() {
         historyPaymentFilter.appendChild(
             filterOption
         );
+    }
+}
+
+
+async function loadPaymentMethodSettings() {
+
+    const inactiveSectionWasOpen =
+        showInactivePaymentMethodsButton
+            .getAttribute("aria-expanded")
+        === "true";
+
+
+    const { data, error } =
+        await supabaseClient
+            .from("payment_methods")
+            .select(`
+                id,
+                name,
+                is_active
+            `)
+            .order("name");
+
+
+    if (error) {
+
+        paymentMethodSettingsMessage.textContent =
+            "Error cargando métodos de pago: "
+            + error.message;
+
+        return;
+    }
+
+
+    const activeMethods =
+        data.filter(
+            method => method.is_active
+        );
+
+
+    const inactiveMethods =
+        data.filter(
+            method => !method.is_active
+        );
+
+
+    paymentMethodSettingsList.innerHTML =
+        "";
+
+    inactivePaymentMethodSettingsList.innerHTML =
+        "";
+
+
+    /*
+        MÉTODOS ACTIVOS
+    */
+
+    if (activeMethods.length === 0) {
+
+        paymentMethodSettingsList.textContent =
+            "No tienes métodos de pago activos.";
+    }
+
+
+    for (const method of activeMethods) {
+
+        const row =
+            document.createElement("div");
+
+        row.className =
+            "payment-method-setting-row";
+
+
+        const name =
+            document.createElement("span");
+
+        name.textContent =
+            method.name;
+
+
+        const deleteButton =
+            document.createElement("button");
+
+        deleteButton.type =
+            "button";
+
+        deleteButton.className =
+            "secondary-button";
+
+        deleteButton.textContent =
+            "Eliminar";
+
+
+        deleteButton.addEventListener(
+            "click",
+            async () => {
+
+                const confirmed =
+                    window.confirm(
+                        `¿Eliminar "${method.name}" de tus métodos de pago?\n\nPodrás restaurarlo después.`
+                    );
+
+
+                if (!confirmed) {
+
+                    return;
+                }
+
+
+                const { error } =
+                    await supabaseClient
+                        .from("payment_methods")
+                        .update({
+                            is_active:
+                                false
+                        })
+                        .eq(
+                            "id",
+                            method.id
+                        );
+
+
+                if (error) {
+
+                    paymentMethodSettingsMessage.textContent =
+                        "Error: "
+                        + error.message;
+
+                    return;
+                }
+
+
+                await loadPaymentMethods();
+
+                await loadPaymentMethodSettings();
+
+
+                paymentMethodSettingsMessage.textContent =
+                    `"${method.name}" se ha eliminado de tus métodos activos.`;
+            }
+        );
+
+
+        row.appendChild(name);
+
+        row.appendChild(
+            deleteButton
+        );
+
+
+        paymentMethodSettingsList.appendChild(
+            row
+        );
+    }
+
+
+    /*
+        MÉTODOS ELIMINADOS
+    */
+
+    for (const method of inactiveMethods) {
+
+        const row =
+            document.createElement("div");
+
+        row.className =
+            "payment-method-setting-row";
+
+
+        const name =
+            document.createElement("span");
+
+        name.textContent =
+            method.name;
+
+
+        const restoreButton =
+            document.createElement("button");
+
+        restoreButton.type =
+            "button";
+
+        restoreButton.className =
+            "secondary-button";
+
+        restoreButton.textContent =
+            "Restaurar";
+
+
+        restoreButton.addEventListener(
+            "click",
+            async () => {
+
+                const { error } =
+                    await supabaseClient
+                        .from("payment_methods")
+                        .update({
+                            is_active:
+                                true
+                        })
+                        .eq(
+                            "id",
+                            method.id
+                        );
+
+
+                if (error) {
+
+                    paymentMethodSettingsMessage.textContent =
+                        "Error: "
+                        + error.message;
+
+                    return;
+                }
+
+
+                await loadPaymentMethods();
+
+                await loadPaymentMethodSettings();
+
+
+                paymentMethodSettingsMessage.textContent =
+                    `"${method.name}" se ha restaurado.`;
+            }
+        );
+
+
+        row.appendChild(name);
+
+        row.appendChild(
+            restoreButton
+        );
+
+
+        inactivePaymentMethodSettingsList.appendChild(
+            row
+        );
+    }
+
+
+    /*
+        BOTÓN DE MÉTODOS ELIMINADOS
+    */
+
+    if (inactiveMethods.length === 0) {
+
+        showInactivePaymentMethodsButton.hidden =
+            true;
+
+        showInactivePaymentMethodsButton
+            .setAttribute(
+                "aria-expanded",
+                "false"
+            );
+
+        inactivePaymentMethodSettingsList.hidden =
+            true;
+
+    } else {
+
+        showInactivePaymentMethodsButton.hidden =
+            false;
+
+
+        showInactivePaymentMethodsButton
+            .setAttribute(
+                "aria-expanded",
+                inactiveSectionWasOpen
+                    ? "true"
+                    : "false"
+            );
+
+
+        inactivePaymentMethodSettingsList.hidden =
+            !inactiveSectionWasOpen;
+
+
+        showInactivePaymentMethodsButton.textContent =
+            `Métodos eliminados (${inactiveMethods.length}) ${
+                inactiveSectionWasOpen
+                    ? "▲"
+                    : "▼"
+            }`;
     }
 }
 
@@ -2774,6 +3610,143 @@ copyPreviousBudgetButton.addEventListener(
 );
 
 
+showInactivePaymentMethodsButton.addEventListener(
+    "click",
+    () => {
+
+        const isOpen =
+            showInactivePaymentMethodsButton
+                .getAttribute(
+                    "aria-expanded"
+                )
+            === "true";
+
+
+        const newState =
+            !isOpen;
+
+
+        showInactivePaymentMethodsButton
+            .setAttribute(
+                "aria-expanded",
+                newState
+                    ? "true"
+                    : "false"
+            );
+
+
+        inactivePaymentMethodSettingsList.hidden =
+            !newState;
+
+
+        const count =
+            inactivePaymentMethodSettingsList
+                .querySelectorAll(
+                    ".payment-method-setting-row"
+                )
+                .length;
+
+
+        showInactivePaymentMethodsButton.textContent =
+            `Métodos eliminados (${count}) ${
+                newState
+                    ? "▲"
+                    : "▼"
+            }`;
+    }
+);
+
+
+paymentMethodForm.addEventListener(
+    "submit",
+    async (event) => {
+
+        event.preventDefault();
+
+
+        const name =
+            newPaymentMethodInput
+                .value
+                .trim();
+
+
+        if (!name) {
+
+            return;
+        }
+
+
+        const { error } =
+            await supabaseClient
+                .from("payment_methods")
+                .insert({
+                    name: name
+                });
+
+
+        if (error) {
+
+            paymentMethodSettingsMessage.textContent =
+                "Error: "
+                + error.message;
+
+            return;
+        }
+
+
+        paymentMethodForm.reset();
+
+
+        paymentMethodSettingsMessage.textContent =
+            "Método añadido correctamente.";
+
+
+        await loadPaymentMethods();
+
+        await loadPaymentMethodSettings();
+    }
+);
+
+
+passwordForm.addEventListener(
+    "submit",
+    async (event) => {
+
+        event.preventDefault();
+
+
+        const newPassword =
+            newPasswordInput.value;
+
+
+        const { error } =
+            await supabaseClient
+                .auth
+                .updateUser({
+                    password:
+                        newPassword
+                });
+
+
+        if (error) {
+
+            passwordMessage.textContent =
+                "Error: "
+                + error.message;
+
+            return;
+        }
+
+
+        passwordForm.reset();
+
+
+        passwordMessage.textContent =
+            "Contraseña actualizada correctamente.";
+    }
+);
+
+
 budgetForm.addEventListener(
     "submit",
     async (event) => {
@@ -3084,19 +4057,77 @@ logoutButton.addEventListener("click", async () => {
     appSection.hidden = true;
     loginSection.hidden = false;
 
+    registerContainer.hidden =
+        true;
+    
+    forgotPasswordContainer.hidden =
+        true;
+
+    newPasswordContainer.hidden =
+        true;
+
+    loginForm.hidden =
+        false;
+
+    showRegisterButton.hidden =
+        false;
+    
+    forgotPasswordButton.hidden =
+        false;
+
+    loginMessage.hidden =
+        false;
+
     categoryList.innerHTML = "";
 });
 
 
 async function initializeApp() {
 
+    const isPasswordRecovery =
+        new URLSearchParams(
+            window.location.search
+        ).get("recovery")
+        === "1";
+
+
     const {
         data: { session }
-    } = await supabaseClient.auth.getSession();
+    } =
+        await supabaseClient
+            .auth
+            .getSession();
+
+
+    if (isPasswordRecovery) {
+
+        if (session) {
+
+            showPasswordRecoveryScreen();
+
+        } else {
+
+            loginMessage.textContent =
+                "El enlace de recuperación no es válido o ha caducado. Solicita uno nuevo.";
+
+
+            window.history.replaceState(
+                {},
+                document.title,
+                window.location.pathname
+            );
+        }
+
+
+        return;
+    }
 
 
     if (session) {
-        showApp(session.user);
+
+        showApp(
+            session.user
+        );
     }
 }
 

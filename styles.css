@@ -215,6 +215,61 @@ textarea:focus {
 }
 
 
+#show-register-button {
+    width: 100%;
+
+    margin-top: 10px;
+}
+
+
+#register-container {
+    margin-top: 24px;
+
+    padding-top: 20px;
+
+    border-top:
+        1px solid #e5e7eb;
+}
+
+
+#register-container h2 {
+    margin-bottom: 16px;
+}
+
+
+#back-to-login-button {
+    margin-top: 2px;
+}
+
+
+#forgot-password-button {
+    width: 100%;
+
+    margin-top: 8px;
+}
+
+
+#forgot-password-container,
+#new-password-container {
+    margin-top: 24px;
+
+    padding-top: 20px;
+
+    border-top:
+        1px solid #e5e7eb;
+}
+
+
+#forgot-password-container h2,
+#new-password-container h2 {
+    margin-bottom: 16px;
+}
+
+
+#back-from-forgot-password-button {
+    margin-top: 2px;
+}
+
 /* =========================
    BUTTONS
    ========================= */
@@ -641,6 +696,96 @@ button:active {
     color: #6b7280;
 
     font-size: 0.8rem;
+}
+
+
+#payment-method-settings {
+    margin-bottom: 24px;
+
+    padding-bottom: 20px;
+
+    border-bottom:
+        1px solid #e5e7eb;
+}
+
+
+#payment-method-form {
+    display: grid;
+
+    grid-template-columns:
+        1fr auto;
+
+    gap: 8px;
+
+    margin-bottom: 14px;
+}
+
+
+#payment-method-settings-list {
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 8px;
+}
+
+
+.payment-method-setting-row {
+    display: flex;
+
+    justify-content: space-between;
+    align-items: center;
+
+    gap: 12px;
+
+    padding: 10px 0;
+
+    border-bottom:
+        1px solid #f3f4f6;
+}
+
+
+.payment-method-setting-row button {
+    padding: 6px 10px;
+
+    font-size: 0.75rem;
+}
+
+
+#show-inactive-payment-methods-button {
+    width: 100%;
+
+    margin-top: 14px;
+
+    padding: 9px 12px;
+
+    font-size: 0.8rem;
+}
+
+
+#inactive-payment-method-settings-list {
+    margin-top: 8px;
+
+    padding: 0 10px;
+
+    border-left:
+        2px solid #e5e7eb;
+}
+
+
+#inactive-payment-method-settings-list
+.payment-method-setting-row {
+    opacity: 0.75;
+}
+
+
+#account-settings {
+    margin-bottom: 24px;
+
+    padding-bottom: 20px;
+
+    border-bottom:
+        1px solid #e5e7eb;
 }
 
 
