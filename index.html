@@ -611,6 +611,17 @@
 
                     <p id="budget-message"></p>
 
+                    <section id="reset-app-settings" aria-labelledby="reset-app-title">
+                        <h3 id="reset-app-title">Empezar de cero</h3>
+                        <p>Se borrarán todos tus gastos, presupuestos, métodos de pago,
+                            categorías personalizadas y configuración. Las categorías iniciales
+                            se restablecerán y la moneda volverá a EUR.</p>
+                        <p>Tu cuenta y tu sesión se conservarán. No se cambiarán
+                            tu email ni tu contraseña.</p>
+                        <button id="open-reset-app-button" type="button"
+                            class="danger-button">Empezar de cero</button>
+                    </section>
+
                 </section>
             </section>
 
@@ -1026,6 +1037,28 @@
 
     </main>
 
+
+    <dialog id="reset-app-dialog" aria-labelledby="reset-app-dialog-title"
+        aria-describedby="reset-app-warning reset-app-account-info">
+        <h2 id="reset-app-dialog-title">Confirmar: Empezar de cero</h2>
+        <p id="reset-app-warning">Esta acción no se puede deshacer. Se borrarán todos
+            tus gastos, presupuestos, métodos de pago, categorías y configuración,
+            incluidas las categorías eliminadas. Se crearán de nuevo las cinco
+            categorías iniciales y la moneda será EUR.</p>
+        <p id="reset-app-account-info">Tu cuenta, email, contraseña y sesión se conservarán.</p>
+        <form id="reset-app-form">
+            <label for="reset-app-confirmation">Escribe exactamente BORRAR para confirmar</label>
+            <textarea id="reset-app-confirmation" name="confirmation" rows="1"
+                autocomplete="off" autocapitalize="off" spellcheck="false" required autofocus></textarea>
+            <div class="reset-app-actions">
+                <button id="cancel-reset-app-button" type="button"
+                    class="secondary-button">Cancelar</button>
+                <button id="confirm-reset-app-button" type="submit"
+                    class="danger-button" disabled>Borrar mis datos</button>
+            </div>
+        </form>
+        <p id="reset-app-message" role="status" aria-live="polite" aria-atomic="true"></p>
+    </dialog>
 
     <script
         src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2">

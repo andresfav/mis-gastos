@@ -407,6 +407,86 @@ const categorySettingsMessage =
 const logoutButton =
     document.getElementById("logout-button");
 
+const openResetAppButton = document.getElementById("open-reset-app-button");
+const resetAppDialog = document.getElementById("reset-app-dialog");
+const resetAppForm = document.getElementById("reset-app-form");
+const resetAppConfirmation = document.getElementById("reset-app-confirmation");
+const cancelResetAppButton = document.getElementById("cancel-reset-app-button");
+const confirmResetAppButton = document.getElementById("confirm-reset-app-button");
+const resetAppMessage = document.getElementById("reset-app-message");
+let resetAppPending = false;
+
+function updateResetAppControls() {
+    openResetAppButton.disabled = resetAppPending;
+    resetAppConfirmation.disabled = resetAppPending;
+    cancelResetAppButton.disabled = resetAppPending;
+    confirmResetAppButton.disabled = resetAppPending
+        || resetAppConfirmation.value !== "BORRAR";
+    confirmResetAppButton.textContent = resetAppPending
+        ? "Borrando datos..." : "Borrar mis datos";
+    resetAppForm.setAttribute("aria-busy", String(resetAppPending));
+}
+
+function clearResetAppConfirmation() {
+    resetAppForm.reset();
+    resetAppMessage.textContent = "";
+    updateResetAppControls();
+}
+
+openResetAppButton.addEventListener("click", () => {
+    if (resetAppPending || resetAppDialog.open) return;
+    clearResetAppConfirmation();
+    // Un diálogo modal impide interactuar con el resto de la aplicación.
+    resetAppDialog.showModal();
+    resetAppConfirmation.focus();
+});
+
+resetAppConfirmation.addEventListener("input", updateResetAppControls);
+
+cancelResetAppButton.addEventListener("click", () => {
+    if (!resetAppPending) resetAppDialog.close();
+});
+
+resetAppDialog.addEventListener("cancel", event => {
+    // Escape permite cancelar antes de enviar; una RPC en curso no se cancela.
+    if (resetAppPending) event.preventDefault();
+});
+
+resetAppDialog.addEventListener("close", () => {
+    if (!resetAppPending) clearResetAppConfirmation();
+});
+
+resetAppForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (resetAppPending || !resetAppDialog.open
+        || resetAppConfirmation.value !== "BORRAR") return;
+
+    resetAppPending = true;
+    updateResetAppControls();
+    resetAppMessage.textContent = "Borrando datos...";
+
+    try {
+        const { error } = await supabaseClient.rpc("reset_my_app_data", {
+            p_confirmation: "BORRAR"
+        });
+        if (error) throw error;
+    } catch (error) {
+        resetAppPending = false;
+        resetAppMessage.textContent = "No se pudo confirmar el reinicio. "
+            + "Comprueba tu conexión y vuelve a intentarlo. "
+            + "Si se perdió la conexión, revisa tus datos antes de repetir la acción.";
+        updateResetAppControls();
+        resetAppConfirmation.focus();
+        return;
+    }
+
+    // Mantener el bloqueo hasta recargar; no reconstruir datos ni cerrar sesión.
+    confirmResetAppButton.textContent = "Reinicio completado";
+    resetAppMessage.textContent = "Reinicio completado. Recargando la aplicación...";
+    await new Promise(resolve => window.setTimeout(resolve, 1200));
+    window.location.reload();
+});
+
 
 function setTodayAsDefault() {
 
