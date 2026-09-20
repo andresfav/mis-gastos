@@ -779,6 +779,83 @@ button:active {
 }
 
 
+#category-settings {
+    margin-bottom: 24px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+#category-form {
+    margin-bottom: 14px;
+}
+
+.category-form-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+}
+
+.category-setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.category-setting-row > span {
+    flex: 1 1 140px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.category-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.category-actions button {
+    padding: 7px 10px;
+    font-size: 0.8rem;
+}
+
+.category-rename-form {
+    width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+#show-inactive-categories-button {
+    width: 100%;
+    margin-top: 14px;
+    font-size: 0.8rem;
+}
+
+#inactive-category-settings-list {
+    margin-top: 8px;
+    padding: 0 10px;
+    border-left: 2px solid #e5e7eb;
+}
+
+#category-settings-message {
+    min-height: 20px;
+    font-size: 0.9rem;
+    overflow-wrap: anywhere;
+}
+
+#category-settings button:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+
+#category-settings button:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 3px;
+}
+
 #account-settings {
     margin-bottom: 24px;
 

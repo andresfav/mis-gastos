@@ -525,6 +525,34 @@
 
                     </section>
 
+                    <section id="category-settings" aria-labelledby="category-settings-title">
+
+                        <h3 id="category-settings-title">Categorías</h3>
+
+                        <form id="category-form">
+                            <label for="new-category">Nueva categoría</label>
+                            <div class="category-form-fields">
+                                <input id="new-category" type="text"
+                                    placeholder="Ej. Restaurantes" required>
+                                <button type="submit">Añadir</button>
+                            </div>
+                        </form>
+
+                        <div id="category-settings-list"></div>
+
+                        <button id="show-inactive-categories-button"
+                            type="button" class="secondary-button"
+                            aria-expanded="false"
+                            aria-controls="inactive-category-settings-list" hidden>
+                            Categorías eliminadas (0)
+                        </button>
+
+                        <div id="inactive-category-settings-list" hidden></div>
+
+                        <p id="category-settings-message" role="status"
+                            aria-live="polite"></p>
+                    </section>
+
                     <div id="budget-copy-actions">
 
                         <button
@@ -565,15 +593,6 @@
 
                 </section>
             </section>
-
-            <h3 hidden>
-                Categorías disponibles
-            </h3>
-
-            <ul
-                id="category-list"
-                hidden
-            ></ul>
 
             <section
                 id="expense-view"

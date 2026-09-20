@@ -355,6 +355,14 @@ const cancelEditButton =
 
 let editingExpenseId = null;
 
+let editingExpenseCategoryId = null;
+
+let currentUserId = null;
+
+let allCategories = [];
+
+let categoryMutationPending = false;
+
 let monthlySpendingChart = null;
 
 let allExpenses = [];
@@ -379,8 +387,16 @@ const loginMessage =
 const userInfo =
     document.getElementById("user-info");
 
-const categoryList =
-    document.getElementById("category-list");
+const categorySettings = document.getElementById("category-settings");
+const categoryForm = document.getElementById("category-form");
+const newCategoryInput = document.getElementById("new-category");
+const categorySettingsList = document.getElementById("category-settings-list");
+const inactiveCategorySettingsList =
+    document.getElementById("inactive-category-settings-list");
+const showInactiveCategoriesButton =
+    document.getElementById("show-inactive-categories-button");
+const categorySettingsMessage =
+    document.getElementById("category-settings-message");
 
 const logoutButton =
     document.getElementById("logout-button");
@@ -673,6 +689,10 @@ navHistory.addEventListener(
 navAddExpense.addEventListener(
     "click",
     () => {
+        if (editingExpenseId !== null) {
+            resetExpenseForm();
+            expenseMessage.textContent = "";
+        }
         showView("expense");
     }
 );
@@ -1330,6 +1350,11 @@ loginForm.addEventListener("submit", async (event) => {
 
 async function showApp(user) {
 
+    if (currentUserId !== user.id) {
+        clearCategoryState();
+    }
+    currentUserId = user.id;
+
     loginSection.hidden = true;
     appSection.hidden = false;
 
@@ -1338,99 +1363,334 @@ async function showApp(user) {
     userInfo.textContent =
         `Conectado como: ${user.email}`;
 
-    await loadCategories();
-
-    await loadPaymentMethods();
-
-    await loadPaymentMethodSettings();
-
-    await loadUserSettings();
-
-    await loadExpenses();
-
-    await loadDashboard();
-
-    await loadMonthlyEvolution();
-
-    await loadCategoryBudgets();
-
-    await loadBudgetSettings();
+    for (const load of [
+        loadCategories, loadPaymentMethods, loadPaymentMethodSettings,
+        loadUserSettings, loadExpenses, loadDashboard, loadMonthlyEvolution,
+        loadCategoryBudgets, loadBudgetSettings
+    ]) {
+        await load();
+        if (currentUserId !== user.id) return;
+    }
 
     setTodayAsDefault();
 }
 
 
+// RLS protege la propiedad; el filtro explícito también limita cada petición
+// al usuario cuya sesión inició la operación.
 async function loadCategories() {
+    const userId = currentUserId;
+    if (!userId) return false;
 
-    const { data, error } =
-        await supabaseClient
+    try {
+        const { data, error } = await supabaseClient
             .from("categories")
-            .select("id, name")
-            .eq("is_active", true)
+            .select("id, name, is_active")
+            .eq("user_id", userId)
             .order("name");
 
+        if (currentUserId !== userId) return false;
+        if (error) throw error;
 
-    if (error) {
-
-        categoryList.innerHTML =
-            `<li>Error: ${error.message}</li>`;
-
-        return;
-    }
-
-
-    categoryList.innerHTML = "";
-
-    categorySelect.innerHTML =
-        `<option value="">
-            Selecciona una categoría
-        </option>`;
-
-    historyCategoryFilter.innerHTML =
-        `<option value="">
-            Todas
-        </option>`;
-
-    for (const category of data) {
-
-        // Añadimos la categoría a la lista que ya teníamos
-
-        const item =
-            document.createElement("li");
-
-        item.textContent =
-            category.name;
-
-        categoryList.appendChild(item);
-
-
-        // Añadimos la misma categoría al desplegable
-
-        const option =
-            document.createElement("option");
-
-        option.value =
-            category.id;
-
-        option.textContent =
-            category.name;
-
-        categorySelect.appendChild(option);
-
-        const filterOption =
-            document.createElement("option");
-
-        filterOption.value =
-            category.id;
-
-        filterOption.textContent =
-            category.name;
-
-        historyCategoryFilter.appendChild(
-            filterOption
-        );
+        allCategories = data;
+        renderCategoryOptions();
+        renderCategorySettings();
+        return true;
+    } catch (error) {
+        if (currentUserId === userId) {
+            categorySettingsMessage.textContent =
+                "No se pudieron cargar las categorías. Inténtalo de nuevo.";
+        }
+        return false;
     }
 }
+
+
+function renderExpenseCategoryOptions(selectedValue = categorySelect.value) {
+    const available = allCategories.filter(category =>
+        category.is_active || (
+            editingExpenseId !== null
+            && String(category.id) === editingExpenseCategoryId
+        )
+    );
+
+    categorySelect.replaceChildren(new Option(
+        available.length
+            ? "Selecciona una categoría"
+            : "Crea o restaura una categoría en Ajustes",
+        ""
+    ));
+
+    for (const category of available) {
+        categorySelect.add(new Option(
+            category.name + (category.is_active ? "" : " — eliminada"),
+            String(category.id)
+        ));
+    }
+    categorySelect.value = selectedValue;
+    if (categorySelect.selectedIndex < 0) categorySelect.value = "";
+}
+
+
+function renderCategoryOptions() {
+    renderExpenseCategoryOptions();
+
+    const selectedFilter = historyCategoryFilter.value;
+    historyCategoryFilter.replaceChildren(new Option("Todas", ""));
+
+    // El historial puede consultar también las categorías eliminadas.
+    for (const category of allCategories) {
+        historyCategoryFilter.add(new Option(
+            category.name + (category.is_active ? "" : " — eliminada"),
+            String(category.id)
+        ));
+    }
+    historyCategoryFilter.value = selectedFilter;
+    if (historyCategoryFilter.selectedIndex < 0) historyCategoryFilter.value = "";
+}
+
+
+function setCategoryControlsBusy(busy) {
+    categoryMutationPending = busy;
+    categorySettings.setAttribute("aria-busy", String(busy));
+    for (const control of categorySettings.querySelectorAll("input, button")) {
+        control.disabled = busy;
+    }
+}
+
+
+function renderCategorySettings() {
+    const inactive = allCategories.filter(category => !category.is_active);
+    const wasOpen = showInactiveCategoriesButton.getAttribute("aria-expanded") === "true";
+
+    categorySettingsList.replaceChildren();
+    inactiveCategorySettingsList.replaceChildren();
+
+    if (!allCategories.some(category => category.is_active)) {
+        categorySettingsList.textContent =
+            "No tienes categorías activas. Añade una o restaura una eliminada.";
+    }
+
+    for (const category of allCategories) {
+        const row = document.createElement("div");
+        row.className = "category-setting-row";
+
+        const name = document.createElement("span");
+        name.textContent = category.name;
+        const actions = document.createElement("div");
+        actions.className = "category-actions";
+
+        const renameButton = document.createElement("button");
+        renameButton.type = "button";
+        renameButton.className = "secondary-button";
+        renameButton.textContent = "Renombrar";
+        renameButton.setAttribute("aria-label", `Renombrar ${category.name}`);
+        renameButton.addEventListener("click", () => {
+            const form = document.createElement("form");
+            form.className = "category-rename-form";
+            const label = document.createElement("label");
+            const input = document.createElement("input");
+            input.id = `category-name-${category.id}`;
+            input.type = "text";
+            input.required = true;
+            input.value = category.name;
+            label.htmlFor = input.id;
+            label.textContent = `Nuevo nombre de ${category.name}`;
+
+            const formActions = document.createElement("div");
+            formActions.className = "category-actions";
+            const save = document.createElement("button");
+            save.type = "submit";
+            save.textContent = "Guardar";
+            const cancel = document.createElement("button");
+            cancel.type = "button";
+            cancel.className = "secondary-button";
+            cancel.textContent = "Cancelar";
+            cancel.addEventListener("click", () => {
+                row.replaceChildren(name, actions);
+                renameButton.focus();
+            });
+            formActions.append(save, cancel);
+            form.append(label, input, formActions);
+            form.addEventListener("submit", async event => {
+                event.preventDefault();
+                const saved = await saveCategory({ name: input.value.trim() }, category.id);
+                if (!saved && input.isConnected) input.focus();
+            });
+            row.replaceChildren(form);
+            input.focus();
+            input.select();
+        });
+
+        const toggleButton = document.createElement("button");
+        toggleButton.type = "button";
+        toggleButton.className = "secondary-button";
+        toggleButton.textContent = category.is_active ? "Eliminar" : "Restaurar";
+        toggleButton.setAttribute("aria-label", `${toggleButton.textContent} ${category.name}`);
+        toggleButton.addEventListener("click", async () => {
+            if (category.is_active && !window.confirm(
+                `¿Eliminar "${category.name}"?\n\nSe conservarán sus gastos y presupuestos. Podrás restaurarla después.`
+            )) return;
+            await saveCategory({ is_active: !category.is_active }, category.id);
+        });
+
+        actions.append(renameButton, toggleButton);
+        row.append(name, actions);
+        (category.is_active ? categorySettingsList : inactiveCategorySettingsList).append(row);
+    }
+
+    showInactiveCategoriesButton.hidden = inactive.length === 0;
+    const isOpen = inactive.length > 0 && wasOpen;
+    showInactiveCategoriesButton.setAttribute("aria-expanded", String(isOpen));
+    showInactiveCategoriesButton.textContent =
+        `Categorías eliminadas (${inactive.length}) ${isOpen ? "▲" : "▼"}`;
+    inactiveCategorySettingsList.hidden = !isOpen;
+    setCategoryControlsBusy(categoryMutationPending);
+}
+
+
+async function categorySaveError(error, changes, categoryId, userId) {
+    if (error.code !== "23505") {
+        return "No se pudo guardar la categoría. Inténtalo de nuevo.";
+    }
+
+    // Consultar de nuevo permite reconocer duplicados creados en otra pestaña.
+    let categories = allCategories;
+    try {
+        const { data, error: readError } = await supabaseClient
+            .from("categories")
+            .select("id, name, is_active")
+            .eq("user_id", userId);
+        if (!readError) categories = data;
+    } catch {
+        // El catálogo ya cargado permite dar una indicación si falla la red.
+    }
+
+    const name = changes.name?.trim().toLowerCase();
+    const duplicate = categories.find(category =>
+        String(category.id) !== String(categoryId)
+        && category.name.trim().toLowerCase() === name
+    );
+    return duplicate && !duplicate.is_active
+        ? `Ya existe "${duplicate.name}" en Categorías eliminadas. Puedes restaurarla desde allí.`
+        : "Ya tienes una categoría con ese nombre. Usa otro nombre o revisa Categorías eliminadas para restaurarla.";
+}
+
+
+async function saveCategory(changes, categoryId = null) {
+    if (categoryMutationPending || !currentUserId) return false;
+    if ("name" in changes) {
+        changes.name = changes.name.trim();
+        if (!changes.name) {
+            categorySettingsMessage.textContent = "Escribe un nombre para la categoría.";
+            return false;
+        }
+    }
+
+    const userId = currentUserId;
+    setCategoryControlsBusy(true);
+    categorySettingsMessage.textContent = "Guardando categoría…";
+    let saved = false;
+
+    try {
+        const query = categoryId === null
+            ? supabaseClient.from("categories").insert({ ...changes, user_id: userId })
+            : supabaseClient.from("categories").update(changes)
+                .eq("id", categoryId).eq("user_id", userId);
+        const { data, error } = await query.select("id, name, is_active").single();
+        if (currentUserId !== userId) return false;
+        if (error) {
+            const message = await categorySaveError(error, changes, categoryId, userId);
+            if (currentUserId === userId) categorySettingsMessage.textContent = message;
+            return false;
+        }
+        saved = true;
+        if (categoryId === null) categoryForm.reset();
+
+        // Aplicar la fila confirmada sin perder selecciones ni otros formularios.
+        const index = allCategories.findIndex(category => String(category.id) === String(data.id));
+        if (index < 0) allCategories.push(data);
+        else allCategories[index] = data;
+        allCategories.sort((a, b) => a.name.localeCompare(b.name, "es"));
+        renderCategoryOptions();
+        renderCategorySettings();
+
+        // Ocultar inmediatamente el campo eliminado, incluso si falla
+        // la posterior recarga de presupuestos. El registro sigue guardado.
+        for (const input of categoryBudgetInputs.querySelectorAll("input")) {
+            if (input.dataset.categoryId !== String(data.id)) continue;
+            if (!data.is_active) input.closest(".budget-input-row").remove();
+            else input.closest(".budget-input-row").querySelector("label").textContent = data.name;
+        }
+
+        for (const expense of allExpenses) {
+            if (String(expense.category_id) === String(data.id)) {
+                expense.categories = { name: data.name, is_active: data.is_active };
+            }
+        }
+        renderRecentExpenses();
+        applyExpenseFilters();
+
+        const refreshed = await loadBudgetSettings({ preserveDraft: true });
+        if (currentUserId !== userId) return false;
+        const budgetsRefreshed = await loadCategoryBudgets();
+        if (currentUserId !== userId) return false;
+        categorySettingsMessage.textContent = refreshed && budgetsRefreshed
+            ? (categoryId === null ? "Categoría añadida."
+                : "name" in changes ? "Categoría renombrada."
+                : changes.is_active ? "Categoría restaurada." : "Categoría eliminada. Puedes restaurarla después.")
+            : "Categoría guardada. No se pudieron actualizar los presupuestos; recarga la página para consultarlos.";
+        return true;
+    } catch {
+        if (currentUserId === userId) {
+            categorySettingsMessage.textContent = saved
+                ? "Categoría guardada. Recarga la página para actualizar los datos."
+                : "No se pudo guardar la categoría. Inténtalo de nuevo.";
+        }
+        return saved;
+    } finally {
+        if (currentUserId === userId) setCategoryControlsBusy(false);
+    }
+}
+
+
+function clearCategoryState() {
+    currentUserId = null;
+    allCategories = [];
+    allExpenses = [];
+    currentFilteredExpenses = [];
+    categoryForm.reset();
+    categorySettingsMessage.textContent = "";
+    showInactiveCategoriesButton.setAttribute("aria-expanded", "false");
+    setCategoryControlsBusy(false);
+    resetExpenseForm();
+    renderCategoryOptions();
+    renderCategorySettings();
+    categoryBudgetInputs.replaceChildren();
+    categoryBudgetList.replaceChildren();
+    recentExpensesBody.replaceChildren();
+    expenseTableBody.replaceChildren();
+    monthlyBudgetInput.value = "";
+    monthlyBudgetInput.dataset.budgetId = "";
+}
+
+
+categoryForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (await saveCategory({ name: newCategoryInput.value.trim() })) {
+        newCategoryInput.focus();
+    }
+});
+
+
+showInactiveCategoriesButton.addEventListener("click", () => {
+    const isOpen = showInactiveCategoriesButton.getAttribute("aria-expanded") !== "true";
+    showInactiveCategoriesButton.setAttribute("aria-expanded", String(isOpen));
+    inactiveCategorySettingsList.hidden = !isOpen;
+    const count = allCategories.filter(category => !category.is_active).length;
+    showInactiveCategoriesButton.textContent =
+        `Categorías eliminadas (${count}) ${isOpen ? "▲" : "▼"}`;
+});
 
 
 async function loadPaymentMethods() {
@@ -1851,6 +2111,8 @@ async function loadUserSettings() {
 
 
 async function loadExpenses() {
+    const userId = currentUserId;
+    if (!userId) return;
 
     const { data, error } =
         await supabaseClient
@@ -1867,7 +2129,8 @@ async function loadExpenses() {
                 note,
                 created_at,
                 categories (
-                    name
+                    name,
+                    is_active
                 ),
                 payment_methods (
                     name
@@ -1887,9 +2150,11 @@ async function loadExpenses() {
             );
 
 
+    if (currentUserId !== userId) return;
+
     if (error) {
 
-        expenseList.textContent =
+        expenseMessage.textContent =
             "Error cargando gastos: "
             + error.message;
 
@@ -2864,6 +3129,8 @@ async function loadMonthlyEvolution() {
 
 
 async function loadCategoryBudgets() {
+    const userId = currentUserId;
+    if (!userId) return false;
 
     const month =
         getCurrentMonthRange();
@@ -2879,7 +3146,8 @@ async function loadCategoryBudgets() {
                 amount,
                 category_id,
                 categories (
-                    name
+                    name,
+                    is_active
                 )
             `)
             .eq(
@@ -2888,6 +3156,8 @@ async function loadCategoryBudgets() {
             );
 
 
+    if (currentUserId !== userId) return false;
+
     if (budgetsError) {
 
         console.error(
@@ -2895,7 +3165,7 @@ async function loadCategoryBudgets() {
             budgetsError
         );
 
-        return;
+        return false;
     }
 
 
@@ -2919,6 +3189,8 @@ async function loadCategoryBudgets() {
             );
 
 
+    if (currentUserId !== userId) return false;
+
     if (expensesError) {
 
         console.error(
@@ -2926,7 +3198,7 @@ async function loadCategoryBudgets() {
             expensesError
         );
 
-        return;
+        return false;
     }
 
 
@@ -2957,7 +3229,7 @@ async function loadCategoryBudgets() {
         categoryBudgetList.textContent =
             "Todavía no hay presupuestos por categoría para este mes.";
 
-        return;
+        return true;
     }
 
 
@@ -2997,7 +3269,8 @@ async function loadCategoryBudgets() {
             document.createElement("h3");
 
         title.textContent =
-            budget.categories.name;
+            budget.categories.name
+            + (budget.categories.is_active ? "" : " — eliminada");
 
 
         const details =
@@ -3036,10 +3309,13 @@ async function loadCategoryBudgets() {
             container
         );
     }
+    return true;
 }
 
 
-async function loadBudgetSettings() {
+async function loadBudgetSettings({ preserveDraft = false } = {}) {
+    const userId = currentUserId;
+    if (!userId) return false;
 
     const month =
         getCurrentMonthRange();
@@ -3061,6 +3337,8 @@ async function loadBudgetSettings() {
             .maybeSingle();
 
 
+    if (currentUserId !== userId) return false;
+
     if (monthlyBudgetError) {
 
         console.error(
@@ -3068,27 +3346,11 @@ async function loadBudgetSettings() {
             monthlyBudgetError
         );
 
-        return;
+        return false;
     }
 
 
-    if (monthlyBudgetData) {
-
-        monthlyBudgetInput.value =
-            monthlyBudgetData.amount;
-
-        monthlyBudgetInput.dataset.budgetId =
-            monthlyBudgetData.id;
-
-    } else {
-
-        monthlyBudgetInput.value = "";
-
-        monthlyBudgetInput.dataset.budgetId = "";
-    }
-
-
-    // 2. Cargar todas las categorías
+    // 2. Cargar las categorías personales activas
 
     const {
         data: categories,
@@ -3098,8 +3360,11 @@ async function loadBudgetSettings() {
             .from("categories")
             .select("id, name")
             .eq("is_active", true)
+            .eq("user_id", userId)
             .order("name");
 
+
+    if (currentUserId !== userId) return false;
 
     if (categoriesError) {
 
@@ -3108,7 +3373,7 @@ async function loadBudgetSettings() {
             categoriesError
         );
 
-        return;
+        return false;
     }
 
 
@@ -3131,6 +3396,8 @@ async function loadBudgetSettings() {
             );
 
 
+    if (currentUserId !== userId) return false;
+
     if (budgetsError) {
 
         console.error(
@@ -3138,7 +3405,7 @@ async function loadBudgetSettings() {
             budgetsError
         );
 
-        return;
+        return false;
     }
 
 
@@ -3152,7 +3419,7 @@ async function loadBudgetSettings() {
     for (const budget of budgets) {
 
         budgetByCategory.set(
-            budget.category_id,
+            String(budget.category_id),
             budget
         );
     }
@@ -3160,14 +3427,28 @@ async function loadBudgetSettings() {
 
     // 5. Construir los inputs
 
+    // Conservar los importes que se estén editando al administrar categorías.
+    const drafts = new Map();
+    if (preserveDraft) {
+        for (const input of categoryBudgetInputs.querySelectorAll("input")) {
+            drafts.set(input.dataset.categoryId, input.value);
+        }
+    } else {
+        monthlyBudgetInput.value = monthlyBudgetData?.amount ?? "";
+    }
+    monthlyBudgetInput.dataset.budgetId = monthlyBudgetData?.id ?? "";
     categoryBudgetInputs.innerHTML = "";
+    if (categories.length === 0) {
+        categoryBudgetInputs.textContent =
+            "Añade o restaura una categoría para configurar su presupuesto.";
+    }
 
 
     for (const category of categories) {
 
         const existingBudget =
             budgetByCategory.get(
-                category.id
+                String(category.id)
             );
 
 
@@ -3188,6 +3469,8 @@ async function loadBudgetSettings() {
         const input =
             document.createElement("input");
 
+        input.id = `category-budget-${category.id}`;
+        label.htmlFor = input.id;
         input.type =
             "number";
 
@@ -3220,6 +3503,10 @@ async function loadBudgetSettings() {
         }
 
 
+        if (drafts.has(String(category.id))) {
+            input.value = drafts.get(String(category.id));
+        }
+
         container.appendChild(label);
         container.appendChild(input);
 
@@ -3227,10 +3514,13 @@ async function loadBudgetSettings() {
             container
         );
     }
+    return true;
 }
 
 
 async function copyPreviousMonthBudgets() {
+    const userId = currentUserId;
+    if (!userId) return;
 
     const currentMonth =
         getCurrentMonthRange();
@@ -3272,14 +3562,15 @@ async function copyPreviousMonthBudgets() {
     // 2. Buscar presupuestos por categoría anteriores
 
     const {
-        data: previousCategoryBudgets,
+        data: previousBudgets,
         error: categoriesError
     } =
         await supabaseClient
             .from("category_budgets")
             .select(`
                 category_id,
-                amount
+                amount,
+                categories (is_active)
             `)
             .eq(
                 "month_start",
@@ -3297,6 +3588,11 @@ async function copyPreviousMonthBudgets() {
     }
 
 
+    if (currentUserId !== userId) return;
+    const previousCategoryBudgets = previousBudgets.filter(
+        budget => budget.categories?.is_active
+    );
+
     // 3. Comprobar que realmente haya algo para copiar
 
     if (
@@ -3305,7 +3601,7 @@ async function copyPreviousMonthBudgets() {
     ) {
 
         budgetMessage.textContent =
-            "No hay presupuestos en el mes anterior para copiar.";
+            "No hay presupuesto total ni presupuestos de categorías activas en el mes anterior para copiar.";
 
         return;
     }
@@ -3315,7 +3611,7 @@ async function copyPreviousMonthBudgets() {
 
     const confirmed =
         window.confirm(
-            "Se copiarán los presupuestos del mes anterior. "
+            "Se copiarán el presupuesto total y los de categorías activas del mes anterior. "
             + "Los presupuestos actuales que coincidan serán reemplazados. "
             + "¿Quieres continuar?"
         );
@@ -3417,29 +3713,10 @@ async function copyPreviousMonthBudgets() {
         previousCategoryBudgets.length > 0
     ) {
 
-        const { error: deleteError } =
-            await supabaseClient
-                .from("category_budgets")
-                .delete()
-                .eq(
-                    "month_start",
-                    currentMonth.startDate
-                );
-
-
-        if (deleteError) {
-
-            budgetMessage.textContent =
-                "Error preparando los presupuestos por categoría: "
-                + deleteError.message;
-
-            return;
-        }
-
-
         const budgetsToInsert =
             previousCategoryBudgets.map(
                 (budget) => ({
+                    user_id: userId,
                     month_start:
                         currentMonth.startDate,
 
@@ -3455,9 +3732,9 @@ async function copyPreviousMonthBudgets() {
         const { error: insertError } =
             await supabaseClient
                 .from("category_budgets")
-                .insert(
-                    budgetsToInsert
-                );
+                .upsert(budgetsToInsert, {
+                    onConflict: "user_id,month_start,category_id"
+                });
 
 
         if (insertError) {
@@ -3497,8 +3774,8 @@ function startEditingExpense(expense) {
     amountInput.value =
         expense.amount;
 
-    categorySelect.value =
-        expense.category_id;
+    editingExpenseCategoryId = String(expense.category_id);
+    renderExpenseCategoryOptions(editingExpenseCategoryId);
 
     descriptionInput.value =
         expense.description;
@@ -3534,7 +3811,9 @@ function resetExpenseForm() {
     editingExpenseId =
         null;
 
+    editingExpenseCategoryId = null;
     expenseForm.reset();
+    renderExpenseCategoryOptions("");
 
     setTodayAsDefault();
 
@@ -3834,10 +4113,7 @@ budgetForm.addEventListener(
 
         for (const input of inputs) {
 
-            const categoryId =
-                Number(
-                    input.dataset.categoryId
-                );
+            const categoryId = input.dataset.categoryId;
 
             const budgetId =
                 input.dataset.budgetId;
@@ -3962,6 +4238,17 @@ expenseForm.addEventListener(
         event.preventDefault();
 
 
+        const selectedCategory = allCategories.find(
+            category => String(category.id) === categorySelect.value
+        );
+        const keepingOriginal = editingExpenseId !== null
+            && categorySelect.value === editingExpenseCategoryId;
+        if (!selectedCategory || (!selectedCategory.is_active && !keepingOriginal)) {
+            expenseMessage.textContent =
+                "Selecciona una categoría activa o conserva la categoría original del gasto.";
+            return;
+        }
+
         const expense = {
 
             expense_date:
@@ -3971,7 +4258,7 @@ expenseForm.addEventListener(
                 Number(amountInput.value),
 
             category_id:
-                Number(categorySelect.value),
+                categorySelect.value,
 
             description:
                 descriptionInput.value.trim(),
@@ -4052,6 +4339,8 @@ expenseForm.addEventListener(
 
 logoutButton.addEventListener("click", async () => {
 
+    clearCategoryState();
+
     await supabaseClient.auth.signOut();
 
     appSection.hidden = true;
@@ -4078,7 +4367,6 @@ logoutButton.addEventListener("click", async () => {
     loginMessage.hidden =
         false;
 
-    categoryList.innerHTML = "";
 });
 
 
@@ -4168,4 +4456,3 @@ if (
 
 
 initializeApp();
-
