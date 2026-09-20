@@ -153,6 +153,12 @@ const recentExpensesContent =
 const recentExpensesArrow =
     document.getElementById("recent-expenses-arrow");
 
+const paymentSpendingToggle = document.getElementById("payment-spending-toggle");
+const paymentSpendingContent = document.getElementById("payment-spending-content");
+const paymentSpendingArrow = document.getElementById("payment-spending-arrow");
+const paymentSpendingTotal = document.getElementById("payment-spending-total");
+const paymentSpendingList = document.getElementById("payment-spending-list");
+
 const categoryBudgetsToggle =
     document.getElementById(
         "category-budgets-toggle"
@@ -730,6 +736,14 @@ recentExpensesToggle.addEventListener(
                 : "▲";
     }
 );
+
+
+paymentSpendingToggle.addEventListener("click", () => {
+    const isOpen = !paymentSpendingContent.hidden;
+    paymentSpendingContent.hidden = isOpen;
+    paymentSpendingToggle.setAttribute("aria-expanded", String(!isOpen));
+    paymentSpendingArrow.textContent = isOpen ? "▼" : "▲";
+});
 
 
 categoryBudgetsToggle.addEventListener(
@@ -1659,6 +1673,10 @@ function clearCategoryState() {
     allCategories = [];
     allExpenses = [];
     currentFilteredExpenses = [];
+    renderPaymentSpending();
+    paymentSpendingContent.hidden = true;
+    paymentSpendingToggle.setAttribute("aria-expanded", "false");
+    paymentSpendingArrow.textContent = "▼";
     categoryForm.reset();
     categorySettingsMessage.textContent = "";
     showInactiveCategoriesButton.setAttribute("aria-expanded", "false");
@@ -2164,10 +2182,83 @@ async function loadExpenses() {
 
     allExpenses = data;
 
+    renderPaymentSpending();
 
     renderRecentExpenses();
 
     applyExpenseFilters();
+}
+
+
+function getPaymentMethodName(expense) {
+    return expense.payment_methods?.name || "Sin método de pago";
+}
+
+
+function renderPaymentSpending(month = getCurrentMonthRange()) {
+    const spendingByMethod = new Map();
+    let total = 0;
+
+    // Usar los gastos completos, no el historial filtrado ni los métodos activos.
+    for (const expense of allExpenses) {
+        if (expense.expense_date < month.startDate
+            || expense.expense_date >= month.nextMonthDate) continue;
+
+        const amount = Number(expense.amount);
+        if (!Number.isFinite(amount)) continue;
+
+        const methodId = expense.payment_method_id == null || !expense.payment_methods
+            ? null : String(expense.payment_method_id);
+        const group = spendingByMethod.get(methodId) || {
+            name: methodId === null ? "Sin método de pago" : getPaymentMethodName(expense),
+            amount: 0
+        };
+        group.amount += amount;
+        total += amount;
+        spendingByMethod.set(methodId, group);
+    }
+
+    paymentSpendingTotal.textContent = formatCurrency(total);
+    paymentSpendingList.replaceChildren();
+
+    if (spendingByMethod.size === 0) {
+        paymentSpendingList.textContent = "Todavía no hay gastos este mes.";
+        return;
+    }
+
+    const groups = [...spendingByMethod.values()].sort((a, b) =>
+        b.amount - a.amount || a.name.localeCompare(b.name, "es")
+    );
+
+    for (const group of groups) {
+        const percentage = total > 0 ? group.amount / total * 100 : 0;
+        const row = document.createElement("article");
+        row.className = "payment-spending-row";
+        const summary = document.createElement("div");
+        summary.className = "payment-spending-summary";
+
+        const name = document.createElement("span");
+        name.className = "payment-spending-name";
+        name.textContent = group.name;
+        const values = document.createElement("div");
+        values.className = "payment-spending-values";
+        const amount = document.createElement("strong");
+        amount.textContent = formatCurrency(group.amount);
+        const share = document.createElement("span");
+        share.textContent = `${percentage.toLocaleString("es-ES", {
+            maximumFractionDigits: 1
+        })} %`;
+
+        const bar = document.createElement("progress");
+        bar.max = 100;
+        bar.value = Math.max(0, Math.min(percentage, 100));
+        bar.setAttribute("aria-label", `Porcentaje del gasto mensual: ${group.name}`);
+
+        values.append(amount, share);
+        summary.append(name, values);
+        row.append(summary, bar);
+        paymentSpendingList.append(row);
+    }
 }
 
 
@@ -2317,7 +2408,7 @@ function renderExpenseTable(expenses) {
             document.createElement("td");
 
         paymentCell.textContent =
-            expense.payment_methods.name;
+            getPaymentMethodName(expense);
 
 
         const descriptionCell =
@@ -2435,7 +2526,7 @@ function getExpenseSortValue(
     if (field === "payment_method") {
 
         return (
-            expense.payment_methods.name
+            getPaymentMethodName(expense)
             || ""
         ).toLowerCase();
     }
@@ -2585,7 +2676,7 @@ function applyExpenseFilters() {
                         expense.description,
                         expense.merchant,
                         expense.categories.name,
-                        expense.payment_methods.name
+                        getPaymentMethodName(expense)
                     ]
                         .filter(Boolean)
                         .join(" ")
@@ -2750,7 +2841,7 @@ function exportExpensesToCsv() {
 
                     expense.merchant || "",
 
-                    expense.payment_methods.name,
+                    getPaymentMethodName(expense),
 
                     expense.description,
 
@@ -2852,6 +2943,8 @@ async function loadDashboard() {
 
     dashboardMonth.textContent =
         month.label;
+
+    renderPaymentSpending(month);
 
 
     const {

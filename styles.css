@@ -59,6 +59,7 @@ section {
 #dashboard-section,
 #monthly-evolution-section,
 #category-budgets-section,
+#payment-spending-section,
 #recent-expenses-section,
 #budget-settings-section,
 #expense-section,
@@ -348,6 +349,64 @@ button:active {
 
 #category-budgets-content {
     margin-top: 16px;
+}
+
+#payment-spending-content {
+    margin-top: 16px;
+}
+
+.payment-spending-total strong {
+    display: inline-block;
+}
+
+.payment-spending-row {
+    padding: 12px 0;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.payment-spending-row:last-child {
+    border-bottom: none;
+}
+
+.payment-spending-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 16px;
+    margin-bottom: 8px;
+}
+
+.payment-spending-name {
+    flex: 1 1 140px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.payment-spending-values {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+}
+
+.payment-spending-values span {
+    color: #6b7280;
+}
+
+.payment-spending-row progress {
+    appearance: none;
+    background: #e5e7eb;
+}
+
+.payment-spending-row progress::-webkit-progress-bar {
+    background: #e5e7eb;
+}
+
+.payment-spending-row progress::-webkit-progress-value {
+    background: #2563eb;
+}
+
+.payment-spending-row progress::-moz-progress-bar {
+    background: #2563eb;
 }
 
 #history-filters-toggle {
