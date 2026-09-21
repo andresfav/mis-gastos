@@ -365,6 +365,109 @@ let editingExpenseCategoryId = null;
 
 let currentUserId = null;
 
+let sessionGeneration = 0;
+let sessionContext = { generation: 0, userId: null, controller: new AbortController() };
+let activeMutation = null;
+let logoutInProgress = false;
+let allPaymentMethods = [];
+let editingExpensePaymentMethodId = null;
+let expensesRequest = 0;
+
+class SessionChangedError extends Error {}
+
+function isCurrentSession(context) {
+    return context === sessionContext && !context.controller.signal.aborted;
+}
+
+function assertCurrentSession(context) {
+    if (!isCurrentSession(context)) throw new SessionChangedError();
+}
+
+async function sessionRequest(context, request) {
+    assertCurrentSession(context);
+    const result = await request;
+    assertCurrentSession(context);
+    return result;
+}
+
+function createSessionClient(context) {
+    // Este cliente no almacena sesiones ni puede adoptar las credenciales de B.
+    return window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+        accessToken: async () => {
+            assertCurrentSession(context);
+            return context.authSession.access_token;
+        },
+        global: { fetch: (url, options) => {
+            assertCurrentSession(context);
+            return window.fetch(url, { ...options, signal: context.controller.signal });
+        } }
+    });
+}
+
+function releaseMutation(mutation) {
+    if (activeMutation !== mutation) return;
+    for (const [control, disabled] of mutation.controls) control.disabled = disabled;
+    mutation.scope.removeAttribute("aria-busy");
+    activeMutation = null;
+}
+
+async function runMutation(scope, message, work, { anonymous = false } = {}) {
+    if (activeMutation || resetAppPending || logoutInProgress) return false;
+    const context = sessionContext;
+    if (!anonymous && !context.userId) return false;
+    if (context.loading) {
+        message.textContent = "Espera a que termine la carga de tus datos.";
+        return false;
+    }
+    const mutation = {
+        scope,
+        controls: [...document.querySelectorAll("input, select, textarea, button")]
+            .map(control => [control, control.disabled])
+    };
+    activeMutation = mutation;
+    scope.setAttribute("aria-busy", "true");
+    for (const [control] of mutation.controls) control.disabled = true;
+    try {
+        return await work(context);
+    } catch (error) {
+        if (isCurrentSession(context) && !(error instanceof SessionChangedError)) {
+            message.textContent = "No se pudo completar la operación. Inténtalo de nuevo.";
+        }
+        return false;
+    } finally {
+        releaseMutation(mutation);
+    }
+}
+
+function mutationHandler(scope, message, work, options) {
+    return event => {
+        event.preventDefault();
+        return runMutation(scope, message, context => work(event, context), options);
+    };
+}
+
+async function updateSessionPassword(context, password) {
+    assertCurrentSession(context);
+    // Auth necesita una sesión propia; mantenerla solo en memoria y separada
+    // de la sesión principal evita actualizar la contraseña de otra cuenta.
+    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+        auth: {
+            persistSession: false, autoRefreshToken: false, detectSessionInUrl: false,
+            storageKey: `mis-gastos-password-${context.generation}`
+        },
+        global: { fetch: (url, options) => {
+            assertCurrentSession(context);
+            return window.fetch(url, { ...options, signal: context.controller.signal });
+        } }
+    });
+    const { error } = await sessionRequest(context, client.auth.setSession({
+        access_token: context.authSession.access_token,
+        refresh_token: context.authSession.refresh_token
+    }));
+    if (error) return { error };
+    return sessionRequest(context, client.auth.updateUser({ password }));
+}
+
 let allCategories = [];
 
 let categoryMutationPending = false;
@@ -392,6 +495,7 @@ const loginMessage =
 
 const userInfo =
     document.getElementById("user-info");
+const appLoadMessage = document.getElementById("app-load-message");
 
 const categorySettings = document.getElementById("category-settings");
 const categoryForm = document.getElementById("category-form");
@@ -434,7 +538,7 @@ function clearResetAppConfirmation() {
 }
 
 openResetAppButton.addEventListener("click", () => {
-    if (resetAppPending || resetAppDialog.open) return;
+    if (resetAppPending || activeMutation || sessionContext.loading || resetAppDialog.open) return;
     clearResetAppConfirmation();
     // Un diálogo modal impide interactuar con el resto de la aplicación.
     resetAppDialog.showModal();
@@ -458,19 +562,21 @@ resetAppDialog.addEventListener("close", () => {
 
 resetAppForm.addEventListener("submit", async event => {
     event.preventDefault();
-    if (resetAppPending || !resetAppDialog.open
+    if (resetAppPending || activeMutation || logoutInProgress || !sessionContext.userId || !resetAppDialog.open
         || resetAppConfirmation.value !== "BORRAR") return;
 
+    const context = sessionContext;
     resetAppPending = true;
     updateResetAppControls();
     resetAppMessage.textContent = "Borrando datos...";
 
     try {
-        const { error } = await supabaseClient.rpc("reset_my_app_data", {
+        const { error } = await sessionRequest(context, context.client.rpc("reset_my_app_data", {
             p_confirmation: "BORRAR"
-        });
+        }));
         if (error) throw error;
     } catch (error) {
+        if (!isCurrentSession(context)) return;
         resetAppPending = false;
         resetAppMessage.textContent = "No se pudo confirmar el reinicio. "
             + "Comprueba tu conexión y vuelve a intentarlo. "
@@ -484,7 +590,7 @@ resetAppForm.addEventListener("submit", async event => {
     confirmResetAppButton.textContent = "Reinicio completado";
     resetAppMessage.textContent = "Reinicio completado. Recargando la aplicación...";
     await new Promise(resolve => window.setTimeout(resolve, 1200));
-    window.location.reload();
+    if (isCurrentSession(context)) window.location.reload();
 });
 
 
@@ -571,8 +677,10 @@ function escapeCsvValue(value) {
     }
 
 
+    const safeValue = typeof value === "string" && /^[\s]*[=+@-]/.test(value)
+        ? "'" + value : value;
     const text =
-        String(value)
+        String(safeValue)
             .replaceAll(
                 '"',
                 '""'
@@ -929,7 +1037,7 @@ for (
 
 currencySelect.addEventListener(
     "change",
-    async () => {
+    mutationHandler(currencySelect, budgetMessage, async (event, context) => {
 
         const selectedCurrency =
             currencySelect.value;
@@ -941,7 +1049,7 @@ currencySelect.addEventListener(
 
 
         const { error } =
-            await supabaseClient
+            await sessionRequest(context, context.client
                 .from("user_settings")
                 .update({
                     currency_code:
@@ -950,16 +1058,12 @@ currencySelect.addEventListener(
                 .eq(
                     "id",
                     userSettingsId
-                );
+                ));
 
 
         if (error) {
-
-            console.error(
-                "Error cambiando moneda:",
-                error
-            );
-
+            currencySelect.value = currentCurrency;
+            budgetMessage.textContent = "No se pudo cambiar la moneda. Inténtalo de nuevo.";
             return;
         }
 
@@ -968,14 +1072,16 @@ currencySelect.addEventListener(
             selectedCurrency;
 
 
-        await loadExpenses();
+        renderRecentExpenses();
+        renderPaymentSpending();
+        applyExpenseFilters();
 
-        await loadDashboard();
+        await loadDashboard(context);
 
-        await loadMonthlyEvolution();
+        await loadMonthlyEvolution(context);
 
-        await loadCategoryBudgets();
-    }
+        await loadCategoryBudgets(context);
+    })
 );
 
 
@@ -1150,340 +1256,163 @@ backToLoginButton.addEventListener(
 );
 
 
-registerForm.addEventListener(
-    "submit",
-    async (event) => {
-
-        event.preventDefault();
-
-
-        const email =
-            registerEmail.value
-                .trim();
-
-        const password =
-            registerPassword.value;
-
-        const passwordConfirm =
-            registerPasswordConfirm.value;
-
-
-        if (
-            password
-            !== passwordConfirm
-        ) {
-
-            registerMessage.textContent =
-                "Las contraseñas no coinciden.";
-
+registerForm.addEventListener("submit", mutationHandler(
+    registerForm, registerMessage, async (event, context) => {
+        const email = registerEmail.value.trim();
+        const password = registerPassword.value;
+        if (password !== registerPasswordConfirm.value || password.length < 8) {
+            registerMessage.textContent = "Las contraseñas deben coincidir y tener al menos 8 caracteres.";
             return;
         }
-
-
-        if (
-            password.length < 8
-        ) {
-
-            registerMessage.textContent =
-                "La contraseña debe tener al menos 8 caracteres.";
-
-            return;
-        }
-
-
-        registerMessage.textContent =
-            "Creando cuenta...";
-
-
-        const redirectUrl =
-            window.location.origin
-            + window.location.pathname;
-
-
-        const {
-            data,
-            error
-        } =
-            await supabaseClient
-                .auth
-                .signUp({
-                    email:
-                        email,
-
-                    password:
-                        password,
-
-                    options: {
-                        emailRedirectTo:
-                            redirectUrl
-                    }
-                });
-
-
-        if (error) {
-
-            registerMessage.textContent =
-                "Error: "
-                + error.message;
-
-            return;
-        }
-
-
+        registerMessage.textContent = "Creando cuenta...";
+        const { data, error } = await supabaseClient.auth.signUp({
+            email, password,
+            options: { emailRedirectTo: window.location.origin + window.location.pathname }
+        });
+        // SIGNED_IN puede haber activado ya la nueva sesión.
+        if (!isCurrentSession(context)) return;
+        if (error) { registerMessage.textContent = "Error: " + error.message; return; }
         registerForm.reset();
-
-
-        if (data.session) {
-
-            registerMessage.textContent =
-                "";
-
-            await showApp(
-                data.user
-            );
-
-            return;
-        }
-
-
-        registerMessage.textContent =
+        if (data.session) applyAuthSession(data.session);
+        else registerMessage.textContent =
             "Cuenta creada. Revisa tu correo y confirma tu email antes de iniciar sesión.";
-    }
-);
+    }, { anonymous: true }
+));
 
-
-forgotPasswordForm.addEventListener(
-    "submit",
-    async (event) => {
-
-        event.preventDefault();
-
-
-        const email =
-            forgotPasswordEmail
-                .value
-                .trim();
-
-
-        const redirectUrl =
-            window.location.origin
-            + window.location.pathname
-            + "?recovery=1";
-
-
-        forgotPasswordMessage.textContent =
-            "Enviando enlace...";
-
-
-        const { error } =
-            await supabaseClient
-                .auth
-                .resetPasswordForEmail(
-                    email,
-                    {
-                        redirectTo:
-                            redirectUrl
-                    }
-                );
-
-
-        if (error) {
-
-            forgotPasswordMessage.textContent =
-                "Error: "
-                + error.message;
-
-            return;
-        }
-
-
+forgotPasswordForm.addEventListener("submit", mutationHandler(
+    forgotPasswordForm, forgotPasswordMessage, async (event, context) => {
+        const email = forgotPasswordEmail.value.trim();
+        forgotPasswordMessage.textContent = "Enviando enlace...";
+        const { error } = await sessionRequest(context, supabaseClient.auth.resetPasswordForEmail(
+            email, { redirectTo: window.location.origin + window.location.pathname + "?recovery=1" }
+        ));
+        if (error) { forgotPasswordMessage.textContent = "Error: " + error.message; return; }
         forgotPasswordForm.reset();
-
-
         forgotPasswordMessage.textContent =
             "Si existe una cuenta asociada a ese email, recibirás un enlace para cambiar la contraseña.";
+    }, { anonymous: true }
+));
+
+newPasswordForm.addEventListener("submit", mutationHandler(
+    newPasswordForm, newPasswordMessage, async (event, context) => {
+        const password = newRecoveryPassword.value;
+        if (password !== newRecoveryPasswordConfirm.value || password.length < 8) {
+            newPasswordMessage.textContent = "Las contraseñas deben coincidir y tener al menos 8 caracteres.";
+            return;
+        }
+        newPasswordMessage.textContent = "Actualizando contraseña...";
+        const { error } = await updateSessionPassword(context, password);
+        if (error) { newPasswordMessage.textContent = "Error: " + error.message; return; }
+        assertCurrentSession(context);
+        window.history.replaceState({}, document.title, window.location.pathname);
+        const signedOut = await signOutCurrentUser();
+        if (signedOut && !sessionContext.userId) {
+            loginMessage.textContent = "Contraseña actualizada. Ya puedes iniciar sesión con la nueva contraseña.";
+        }
     }
-);
+));
 
-
-newPasswordForm.addEventListener(
-    "submit",
-    async (event) => {
-
-        event.preventDefault();
-
-
-        const password =
-            newRecoveryPassword.value;
-
-        const passwordConfirm =
-            newRecoveryPasswordConfirm.value;
-
-
-        if (
-            password
-            !== passwordConfirm
-        ) {
-
-            newPasswordMessage.textContent =
-                "Las contraseñas no coinciden.";
-
-            return;
-        }
-
-
-        if (
-            password.length < 8
-        ) {
-
-            newPasswordMessage.textContent =
-                "La contraseña debe tener al menos 8 caracteres.";
-
-            return;
-        }
-
-
-        newPasswordMessage.textContent =
-            "Actualizando contraseña...";
-
-
-        const { error } =
-            await supabaseClient
-                .auth
-                .updateUser({
-                    password:
-                        password
-                });
-
-
-        if (error) {
-
-            newPasswordMessage.textContent =
-                "Error: "
-                + error.message;
-
-            return;
-        }
-
-
-        newPasswordForm.reset();
-
-
-        await supabaseClient
-            .auth
-            .signOut();
-
-
-        window.history.replaceState(
-            {},
-            document.title,
-            window.location.pathname
-        );
-
-
-        newPasswordContainer.hidden =
-            true;
-
-        forgotPasswordContainer.hidden =
-            true;
-
-        registerContainer.hidden =
-            true;
-
-
-        loginForm.hidden =
-            false;
-
-        showRegisterButton.hidden =
-            false;
-
-        forgotPasswordButton.hidden =
-            false;
-
-        loginMessage.hidden =
-            false;
-
-
-        loginMessage.textContent =
-            "Contraseña actualizada. Ya puedes iniciar sesión con la nueva contraseña.";
-    }
-);
-
-
-loginForm.addEventListener("submit", async (event) => {
-
-    event.preventDefault();
-
-    const email =
-        document.getElementById("email").value;
-
-    const password =
-        document.getElementById("password").value;
-
-
-    const { data, error } =
-        await supabaseClient.auth.signInWithPassword({
-            email: email,
-            password: password
+loginForm.addEventListener("submit", mutationHandler(
+    loginForm, loginMessage, async (event, context) => {
+        const { data, error } = await supabaseClient.auth.signInWithPassword({
+            email: document.getElementById("email").value.trim(),
+            password: document.getElementById("password").value
         });
+        if (!isCurrentSession(context)) return;
+        if (error) { loginMessage.textContent = "Error: " + error.message; return; }
+        applyAuthSession(data.session);
+    }, { anonymous: true }
+));
 
-
-    if (error) {
-        loginMessage.textContent =
-            "Error: " + error.message;
-
-        return;
-    }
-
-
-    loginMessage.textContent = "";
-
-    showApp(data.user);
-});
-
-
-async function showApp(user) {
-
-    if (currentUserId !== user.id) {
-        clearCategoryState();
-    }
-    currentUserId = user.id;
-
-    loginSection.hidden = true;
-    appSection.hidden = false;
-
-    showView("home");
-
-    userInfo.textContent =
-        `Conectado como: ${user.email}`;
-
-    for (const load of [
-        loadCategories, loadPaymentMethods, loadPaymentMethodSettings,
-        loadUserSettings, loadExpenses, loadDashboard, loadMonthlyEvolution,
-        loadCategoryBudgets, loadBudgetSettings
-    ]) {
-        await load();
-        if (currentUserId !== user.id) return;
-    }
-
-    setTodayAsDefault();
+function showLoginScreen() {
+    appSection.hidden = true;
+    loginSection.hidden = false;
+    registerContainer.hidden = true;
+    forgotPasswordContainer.hidden = true;
+    newPasswordContainer.hidden = true;
+    loginForm.hidden = false;
+    showRegisterButton.hidden = false;
+    forgotPasswordButton.hidden = false;
+    loginMessage.hidden = false;
 }
 
+function applyAuthSession(authSession, event = "") {
+    if (logoutInProgress && authSession) return;
+    const userId = authSession?.user.id ?? null;
+    const recovery = event === "PASSWORD_RECOVERY"
+        || new URLSearchParams(window.location.search).get("recovery") === "1";
+    if (sessionContext.userId === userId && sessionContext.recovery === recovery) {
+        if (authSession) sessionContext.authSession = authSession;
+        return;
+    }
+    clearCategoryState();
+    const context = sessionContext;
+    context.recovery = recovery;
+    if (!authSession) {
+        showLoginScreen();
+        if (recovery) {
+            loginMessage.textContent = "El enlace de recuperación no es válido o ha caducado. Solicita uno nuevo.";
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        return;
+    }
+    context.userId = userId;
+    context.authSession = authSession;
+    context.client = createSessionClient(context);
+    currentUserId = userId;
+    if (recovery) { showPasswordRecoveryScreen(); return; }
+    context.loading = true;
+    // El callback de Auth debe terminar sin esperar otras llamadas del SDK.
+    context.ready = new Promise(resolve => {
+        window.setTimeout(() => resolve(showApp(authSession.user, context)), 0);
+    });
+}
+
+async function showApp(user, context = sessionContext) {
+    if (!isCurrentSession(context) || context.userId !== user.id) return;
+    context.loading = true;
+    loginSection.hidden = true;
+    appSection.hidden = false;
+    appLoadMessage.textContent = "Cargando datos...";
+    showView("home");
+    userInfo.textContent = `Conectado como: ${user.email}`;
+    try {
+        for (const load of [
+            loadCategories, loadPaymentMethods, loadPaymentMethodSettings,
+            loadUserSettings, loadExpenses, loadDashboard, loadMonthlyEvolution,
+            loadCategoryBudgets
+        ]) {
+            assertCurrentSession(context);
+            await load(context);
+        }
+        await loadBudgetSettings({}, context);
+        assertCurrentSession(context);
+        setTodayAsDefault();
+        appLoadMessage.textContent = "";
+    } catch (error) {
+        if (isCurrentSession(context)) {
+            appLoadMessage.textContent = "No se pudieron cargar todos los datos. Recarga para intentarlo de nuevo.";
+        }
+    } finally {
+        if (isCurrentSession(context)) context.loading = false;
+    }
+}
 
 // RLS protege la propiedad; el filtro explícito también limita cada petición
 // al usuario cuya sesión inició la operación.
-async function loadCategories() {
+async function loadCategories(context = sessionContext) {
+    assertCurrentSession(context);
     const userId = currentUserId;
     if (!userId) return false;
 
     try {
-        const { data, error } = await supabaseClient
+        const { data, error } = await sessionRequest(context, context.client
             .from("categories")
             .select("id, name, is_active")
             .eq("user_id", userId)
-            .order("name");
+            .order("name"));
 
-        if (currentUserId !== userId) return false;
+        if (!isCurrentSession(context)) return false;
         if (error) throw error;
 
         allCategories = data;
@@ -1491,7 +1420,7 @@ async function loadCategories() {
         renderCategorySettings();
         return true;
     } catch (error) {
-        if (currentUserId === userId) {
+        if (isCurrentSession(context)) {
             categorySettingsMessage.textContent =
                 "No se pudieron cargar las categorías. Inténtalo de nuevo.";
         }
@@ -1643,7 +1572,7 @@ function renderCategorySettings() {
 }
 
 
-async function categorySaveError(error, changes, categoryId, userId) {
+async function categorySaveError(error, changes, categoryId, userId, context) {
     if (error.code !== "23505") {
         return "No se pudo guardar la categoría. Inténtalo de nuevo.";
     }
@@ -1651,10 +1580,10 @@ async function categorySaveError(error, changes, categoryId, userId) {
     // Consultar de nuevo permite reconocer duplicados creados en otra pestaña.
     let categories = allCategories;
     try {
-        const { data, error: readError } = await supabaseClient
+        const { data, error: readError } = await sessionRequest(context, context.client
             .from("categories")
             .select("id, name, is_active")
-            .eq("user_id", userId);
+            .eq("user_id", userId));
         if (!readError) categories = data;
     } catch {
         // El catálogo ya cargado permite dar una indicación si falla la red.
@@ -1672,106 +1601,157 @@ async function categorySaveError(error, changes, categoryId, userId) {
 
 
 async function saveCategory(changes, categoryId = null) {
-    if (categoryMutationPending || !currentUserId) return false;
-    if ("name" in changes) {
-        changes.name = changes.name.trim();
-        if (!changes.name) {
-            categorySettingsMessage.textContent = "Escribe un nombre para la categoría.";
-            return false;
-        }
-    }
-
-    const userId = currentUserId;
-    setCategoryControlsBusy(true);
-    categorySettingsMessage.textContent = "Guardando categoría…";
-    let saved = false;
-
-    try {
-        const query = categoryId === null
-            ? supabaseClient.from("categories").insert({ ...changes, user_id: userId })
-            : supabaseClient.from("categories").update(changes)
-                .eq("id", categoryId).eq("user_id", userId);
-        const { data, error } = await query.select("id, name, is_active").single();
-        if (currentUserId !== userId) return false;
-        if (error) {
-            const message = await categorySaveError(error, changes, categoryId, userId);
-            if (currentUserId === userId) categorySettingsMessage.textContent = message;
-            return false;
-        }
-        saved = true;
-        if (categoryId === null) categoryForm.reset();
-
-        // Aplicar la fila confirmada sin perder selecciones ni otros formularios.
-        const index = allCategories.findIndex(category => String(category.id) === String(data.id));
-        if (index < 0) allCategories.push(data);
-        else allCategories[index] = data;
-        allCategories.sort((a, b) => a.name.localeCompare(b.name, "es"));
-        renderCategoryOptions();
-        renderCategorySettings();
-
-        // Ocultar inmediatamente el campo eliminado, incluso si falla
-        // la posterior recarga de presupuestos. El registro sigue guardado.
-        for (const input of categoryBudgetInputs.querySelectorAll("input")) {
-            if (input.dataset.categoryId !== String(data.id)) continue;
-            if (!data.is_active) input.closest(".budget-input-row").remove();
-            else input.closest(".budget-input-row").querySelector("label").textContent = data.name;
-        }
-
-        for (const expense of allExpenses) {
-            if (String(expense.category_id) === String(data.id)) {
-                expense.categories = { name: data.name, is_active: data.is_active };
+    return runMutation(categorySettings, categorySettingsMessage, async context => {
+        if (categoryMutationPending || !currentUserId) return false;
+        if ("name" in changes) {
+            changes.name = changes.name.trim();
+            if (!changes.name) {
+                categorySettingsMessage.textContent = "Escribe un nombre para la categoría.";
+                return false;
             }
         }
-        renderRecentExpenses();
-        applyExpenseFilters();
 
-        const refreshed = await loadBudgetSettings({ preserveDraft: true });
-        if (currentUserId !== userId) return false;
-        const budgetsRefreshed = await loadCategoryBudgets();
-        if (currentUserId !== userId) return false;
-        categorySettingsMessage.textContent = refreshed && budgetsRefreshed
-            ? (categoryId === null ? "Categoría añadida."
-                : "name" in changes ? "Categoría renombrada."
-                : changes.is_active ? "Categoría restaurada." : "Categoría eliminada. Puedes restaurarla después.")
-            : "Categoría guardada. No se pudieron actualizar los presupuestos; recarga la página para consultarlos.";
-        return true;
-    } catch {
-        if (currentUserId === userId) {
-            categorySettingsMessage.textContent = saved
-                ? "Categoría guardada. Recarga la página para actualizar los datos."
-                : "No se pudo guardar la categoría. Inténtalo de nuevo.";
+        const userId = currentUserId;
+        setCategoryControlsBusy(true);
+        categorySettingsMessage.textContent = "Guardando categoría…";
+        let saved = false;
+
+        try {
+            const query = categoryId === null
+                ? context.client.from("categories").insert({ ...changes, user_id: userId })
+                : context.client.from("categories").update(changes)
+                    .eq("id", categoryId).eq("user_id", userId);
+            const { data, error } = await sessionRequest(context, query.select("id, name, is_active").single());
+            if (!isCurrentSession(context)) return false;
+            if (error) {
+                const message = await categorySaveError(error, changes, categoryId, userId, context);
+                if (isCurrentSession(context)) categorySettingsMessage.textContent = message;
+                return false;
+            }
+            saved = true;
+            if (categoryId === null) categoryForm.reset();
+
+            // Aplicar la fila confirmada sin perder selecciones ni otros formularios.
+            const index = allCategories.findIndex(category => String(category.id) === String(data.id));
+            if (index < 0) allCategories.push(data);
+            else allCategories[index] = data;
+            allCategories.sort((a, b) => a.name.localeCompare(b.name, "es"));
+            renderCategoryOptions();
+            renderCategorySettings();
+
+            // Ocultar inmediatamente el campo eliminado, incluso si falla
+            // la posterior recarga de presupuestos. El registro sigue guardado.
+            for (const input of categoryBudgetInputs.querySelectorAll("input")) {
+                if (input.dataset.categoryId !== String(data.id)) continue;
+                if (!data.is_active) input.closest(".budget-input-row").remove();
+                else input.closest(".budget-input-row").querySelector("label").textContent = data.name;
+            }
+
+            for (const expense of allExpenses) {
+                if (String(expense.category_id) === String(data.id)) {
+                    expense.categories = { name: data.name, is_active: data.is_active };
+                }
+            }
+            renderRecentExpenses();
+            applyExpenseFilters();
+
+            const refreshed = await loadBudgetSettings({ preserveDraft: true }, context);
+            if (!isCurrentSession(context)) return false;
+            const budgetsRefreshed = await loadCategoryBudgets(context);
+            if (!isCurrentSession(context)) return false;
+            categorySettingsMessage.textContent = refreshed && budgetsRefreshed
+                ? (categoryId === null ? "Categoría añadida."
+                    : "name" in changes ? "Categoría renombrada."
+                    : changes.is_active ? "Categoría restaurada." : "Categoría eliminada. Puedes restaurarla después.")
+                : "Categoría guardada. No se pudieron actualizar los presupuestos; recarga la página para consultarlos.";
+            return true;
+        } catch {
+            if (isCurrentSession(context)) {
+                categorySettingsMessage.textContent = saved
+                    ? "Categoría guardada. Recarga la página para actualizar los datos."
+                    : "No se pudo guardar la categoría. Inténtalo de nuevo.";
+            }
+            return saved;
+        } finally {
+            if (isCurrentSession(context)) setCategoryControlsBusy(false);
         }
-        return saved;
-    } finally {
-        if (currentUserId === userId) setCategoryControlsBusy(false);
-    }
+    });
 }
 
 
 function clearCategoryState() {
+    sessionContext.controller.abort();
+    sessionContext = { generation: ++sessionGeneration, userId: null,
+        controller: new AbortController() };
+    if (activeMutation) releaseMutation(activeMutation);
     currentUserId = null;
+    expensesRequest++;
     allCategories = [];
+    allPaymentMethods = [];
     allExpenses = [];
     currentFilteredExpenses = [];
-    renderPaymentSpending();
-    paymentSpendingContent.hidden = true;
-    paymentSpendingToggle.setAttribute("aria-expanded", "false");
-    paymentSpendingArrow.textContent = "▼";
-    categoryForm.reset();
-    categorySettingsMessage.textContent = "";
-    showInactiveCategoriesButton.setAttribute("aria-expanded", "false");
+    currentCurrency = "EUR";
+    userSettingsId = null;
+    expenseSortField = "expense_date";
+    expenseSortDirection = "desc";
+    if (monthlySpendingChart) monthlySpendingChart.destroy();
+    monthlySpendingChart = null;
+    monthlySpendingCanvas.getContext("2d").clearRect(
+        0, 0, monthlySpendingCanvas.width, monthlySpendingCanvas.height
+    );
+    for (const form of document.querySelectorAll("form")) form.reset();
+    for (const message of document.querySelectorAll('[id$="-message"]')) {
+        message.textContent = "";
+    }
+    userInfo.textContent = "";
+    historySearch.value = "";
+    historyDateFrom.value = "";
+    historyDateTo.value = "";
+    historyCategoryFilter.value = "";
+    historyPaymentFilter.value = "";
+    currencySelect.value = "EUR";
     setCategoryControlsBusy(false);
     resetExpenseForm();
     renderCategoryOptions();
     renderCategorySettings();
+    renderPaymentMethodOptions();
+    paymentMethodSettingsList.replaceChildren();
+    inactivePaymentMethodSettingsList.replaceChildren();
     categoryBudgetInputs.replaceChildren();
     categoryBudgetList.replaceChildren();
     recentExpensesBody.replaceChildren();
     expenseTableBody.replaceChildren();
     monthlyBudgetInput.value = "";
     monthlyBudgetInput.dataset.budgetId = "";
+    for (const element of [totalSpent, monthlyBudget, availableBudget]) {
+        element.textContent = formatCurrency(0);
+    }
+    dashboardMonth.textContent = getCurrentMonthRange().label;
+    budgetPercentage.textContent = "0 %";
+    budgetProgress.value = 0;
+    budgetProgress.classList.remove("over-budget");
+    availableBudget.classList.remove("negative-value");
+    updateHistorySummary([]);
+    updateSortIndicators();
+    renderPaymentSpending();
+    for (const [toggle, content, arrow] of [
+        [recentExpensesToggle, recentExpensesContent, recentExpensesArrow],
+        [paymentSpendingToggle, paymentSpendingContent, paymentSpendingArrow],
+        [categoryBudgetsToggle, categoryBudgetsContent, categoryBudgetsArrow],
+        [historyFiltersToggle, historyFiltersContent, historyFiltersArrow],
+        [showInactiveCategoriesButton, inactiveCategorySettingsList],
+        [showInactivePaymentMethodsButton, inactivePaymentMethodSettingsList]
+    ]) {
+        toggle.setAttribute("aria-expanded", "false");
+        content.hidden = true;
+        if (arrow) arrow.textContent = "▼";
+    }
+    showInactiveCategoriesButton.hidden = true;
+    showInactivePaymentMethodsButton.hidden = true;
+    resetAppPending = false;
+    if (resetAppDialog.open) resetAppDialog.close();
+    clearResetAppConfirmation();
 }
-
 
 categoryForm.addEventListener("submit", async event => {
     event.preventDefault();
@@ -1791,357 +1771,105 @@ showInactiveCategoriesButton.addEventListener("click", () => {
 });
 
 
-async function loadPaymentMethods() {
-
-    const { data, error } =
-        await supabaseClient
-            .from("payment_methods")
-            .select("id, name")
-            .eq("is_active", true)
-            .order("name");
-
-
+async function loadPaymentMethods(context = sessionContext) {
+    const { data, error } = await sessionRequest(context, context.client
+        .from("payment_methods").select("id, name, is_active")
+        .eq("user_id", context.userId).order("name"));
     if (error) {
-
-        expenseMessage.textContent =
-            "Error cargando métodos de pago: "
-            + error.message;
-
-        return;
+        expenseMessage.textContent = "Error cargando métodos de pago: " + error.message;
+        return false;
     }
+    allPaymentMethods = data;
+    renderPaymentMethodOptions();
+    return true;
+}
 
-
-    paymentMethodSelect.innerHTML =
-        `<option value="">
-            Selecciona método de pago
-        </option>`;
-
-    historyPaymentFilter.innerHTML =
-        `<option value="">
-            Todos
-        </option>`;
-
-    for (const method of data) {
-
-        const option =
-            document.createElement("option");
-
-        option.value =
-            method.id;
-
-        option.textContent =
-            method.name;
-
-        paymentMethodSelect.appendChild(option);
-
-        const filterOption =
-            document.createElement("option");
-
-        filterOption.value =
-            method.id;
-
-        filterOption.textContent =
-            method.name;
-
-        historyPaymentFilter.appendChild(
-            filterOption
-        );
+function renderPaymentMethodOptions(selectedValue = paymentMethodSelect.value) {
+    const methods = allPaymentMethods.filter(method => method.is_active || (
+        editingExpenseId !== null && String(method.id) === editingExpensePaymentMethodId
+    ));
+    paymentMethodSelect.replaceChildren(new Option(
+        methods.length ? "Selecciona método de pago" : "Añade o restaura un método en Ajustes", ""
+    ));
+    for (const method of methods) {
+        paymentMethodSelect.add(new Option(
+            method.name + (method.is_active ? "" : " — eliminado"), String(method.id)
+        ));
     }
+    paymentMethodSelect.value = selectedValue;
+    if (paymentMethodSelect.selectedIndex < 0) paymentMethodSelect.value = "";
+    const selectedFilter = historyPaymentFilter.value;
+    const usedIds = new Set(allExpenses.map(expense => String(expense.payment_method_id)));
+    historyPaymentFilter.replaceChildren(new Option("Todos", ""));
+    for (const method of allPaymentMethods) {
+        if (!method.is_active && !usedIds.has(String(method.id))) continue;
+        historyPaymentFilter.add(new Option(
+            method.name + (method.is_active ? "" : " — eliminado"), String(method.id)
+        ));
+    }
+    historyPaymentFilter.value = selectedFilter;
+    if (historyPaymentFilter.selectedIndex < 0) historyPaymentFilter.value = "";
+}
+
+async function loadPaymentMethodSettings(context = sessionContext) {
+    assertCurrentSession(context);
+    const inactive = allPaymentMethods.filter(method => !method.is_active);
+    const wasOpen = showInactivePaymentMethodsButton.getAttribute("aria-expanded") === "true";
+    paymentMethodSettingsList.replaceChildren();
+    inactivePaymentMethodSettingsList.replaceChildren();
+    if (!allPaymentMethods.some(method => method.is_active)) {
+        paymentMethodSettingsList.textContent = "No tienes métodos de pago activos.";
+    }
+    for (const method of allPaymentMethods) {
+        const row = document.createElement("div");
+        row.className = "payment-method-setting-row";
+        const name = document.createElement("span");
+        name.textContent = method.name;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary-button";
+        button.textContent = method.is_active ? "Eliminar" : "Restaurar";
+        button.addEventListener("click", mutationHandler(
+            paymentMethodForm.closest("section"), paymentMethodSettingsMessage,
+            async (event, operationContext) => {
+                assertCurrentSession(context);
+                if (method.is_active && !window.confirm(
+                    `¿Eliminar "${method.name}" de tus métodos de pago?\n\nPodrás restaurarlo después.`
+                )) return;
+                const { error } = await sessionRequest(operationContext, operationContext.client
+                    .from("payment_methods").update({ is_active: !method.is_active })
+                    .eq("id", method.id).eq("user_id", operationContext.userId));
+                if (error) throw error;
+                await loadPaymentMethods(operationContext);
+                await loadPaymentMethodSettings(operationContext);
+                paymentMethodSettingsMessage.textContent = method.is_active
+                    ? `"${method.name}" se ha eliminado de tus métodos activos.`
+                    : `"${method.name}" se ha restaurado.`;
+            }
+        ));
+        row.append(name, button);
+        (method.is_active ? paymentMethodSettingsList : inactivePaymentMethodSettingsList).append(row);
+    }
+    showInactivePaymentMethodsButton.hidden = inactive.length === 0;
+    const open = wasOpen && inactive.length > 0;
+    inactivePaymentMethodSettingsList.hidden = !open;
+    showInactivePaymentMethodsButton.setAttribute("aria-expanded", String(open));
+    showInactivePaymentMethodsButton.textContent =
+        `Métodos eliminados (${inactive.length}) ${open ? "▲" : "▼"}`;
 }
 
 
-async function loadPaymentMethodSettings() {
-
-    const inactiveSectionWasOpen =
-        showInactivePaymentMethodsButton
-            .getAttribute("aria-expanded")
-        === "true";
-
+async function loadUserSettings(context = sessionContext) {
+    assertCurrentSession(context);
 
     const { data, error } =
-        await supabaseClient
-            .from("payment_methods")
-            .select(`
-                id,
-                name,
-                is_active
-            `)
-            .order("name");
-
-
-    if (error) {
-
-        paymentMethodSettingsMessage.textContent =
-            "Error cargando métodos de pago: "
-            + error.message;
-
-        return;
-    }
-
-
-    const activeMethods =
-        data.filter(
-            method => method.is_active
-        );
-
-
-    const inactiveMethods =
-        data.filter(
-            method => !method.is_active
-        );
-
-
-    paymentMethodSettingsList.innerHTML =
-        "";
-
-    inactivePaymentMethodSettingsList.innerHTML =
-        "";
-
-
-    /*
-        MÉTODOS ACTIVOS
-    */
-
-    if (activeMethods.length === 0) {
-
-        paymentMethodSettingsList.textContent =
-            "No tienes métodos de pago activos.";
-    }
-
-
-    for (const method of activeMethods) {
-
-        const row =
-            document.createElement("div");
-
-        row.className =
-            "payment-method-setting-row";
-
-
-        const name =
-            document.createElement("span");
-
-        name.textContent =
-            method.name;
-
-
-        const deleteButton =
-            document.createElement("button");
-
-        deleteButton.type =
-            "button";
-
-        deleteButton.className =
-            "secondary-button";
-
-        deleteButton.textContent =
-            "Eliminar";
-
-
-        deleteButton.addEventListener(
-            "click",
-            async () => {
-
-                const confirmed =
-                    window.confirm(
-                        `¿Eliminar "${method.name}" de tus métodos de pago?\n\nPodrás restaurarlo después.`
-                    );
-
-
-                if (!confirmed) {
-
-                    return;
-                }
-
-
-                const { error } =
-                    await supabaseClient
-                        .from("payment_methods")
-                        .update({
-                            is_active:
-                                false
-                        })
-                        .eq(
-                            "id",
-                            method.id
-                        );
-
-
-                if (error) {
-
-                    paymentMethodSettingsMessage.textContent =
-                        "Error: "
-                        + error.message;
-
-                    return;
-                }
-
-
-                await loadPaymentMethods();
-
-                await loadPaymentMethodSettings();
-
-
-                paymentMethodSettingsMessage.textContent =
-                    `"${method.name}" se ha eliminado de tus métodos activos.`;
-            }
-        );
-
-
-        row.appendChild(name);
-
-        row.appendChild(
-            deleteButton
-        );
-
-
-        paymentMethodSettingsList.appendChild(
-            row
-        );
-    }
-
-
-    /*
-        MÉTODOS ELIMINADOS
-    */
-
-    for (const method of inactiveMethods) {
-
-        const row =
-            document.createElement("div");
-
-        row.className =
-            "payment-method-setting-row";
-
-
-        const name =
-            document.createElement("span");
-
-        name.textContent =
-            method.name;
-
-
-        const restoreButton =
-            document.createElement("button");
-
-        restoreButton.type =
-            "button";
-
-        restoreButton.className =
-            "secondary-button";
-
-        restoreButton.textContent =
-            "Restaurar";
-
-
-        restoreButton.addEventListener(
-            "click",
-            async () => {
-
-                const { error } =
-                    await supabaseClient
-                        .from("payment_methods")
-                        .update({
-                            is_active:
-                                true
-                        })
-                        .eq(
-                            "id",
-                            method.id
-                        );
-
-
-                if (error) {
-
-                    paymentMethodSettingsMessage.textContent =
-                        "Error: "
-                        + error.message;
-
-                    return;
-                }
-
-
-                await loadPaymentMethods();
-
-                await loadPaymentMethodSettings();
-
-
-                paymentMethodSettingsMessage.textContent =
-                    `"${method.name}" se ha restaurado.`;
-            }
-        );
-
-
-        row.appendChild(name);
-
-        row.appendChild(
-            restoreButton
-        );
-
-
-        inactivePaymentMethodSettingsList.appendChild(
-            row
-        );
-    }
-
-
-    /*
-        BOTÓN DE MÉTODOS ELIMINADOS
-    */
-
-    if (inactiveMethods.length === 0) {
-
-        showInactivePaymentMethodsButton.hidden =
-            true;
-
-        showInactivePaymentMethodsButton
-            .setAttribute(
-                "aria-expanded",
-                "false"
-            );
-
-        inactivePaymentMethodSettingsList.hidden =
-            true;
-
-    } else {
-
-        showInactivePaymentMethodsButton.hidden =
-            false;
-
-
-        showInactivePaymentMethodsButton
-            .setAttribute(
-                "aria-expanded",
-                inactiveSectionWasOpen
-                    ? "true"
-                    : "false"
-            );
-
-
-        inactivePaymentMethodSettingsList.hidden =
-            !inactiveSectionWasOpen;
-
-
-        showInactivePaymentMethodsButton.textContent =
-            `Métodos eliminados (${inactiveMethods.length}) ${
-                inactiveSectionWasOpen
-                    ? "▲"
-                    : "▼"
-            }`;
-    }
-}
-
-
-async function loadUserSettings() {
-
-    const { data, error } =
-        await supabaseClient
+        await sessionRequest(context, context.client
             .from("user_settings")
             .select(`
                 id,
                 currency_code
             `)
-            .maybeSingle();
+            .maybeSingle());
 
 
     if (error) {
@@ -2174,16 +1902,17 @@ async function loadUserSettings() {
         data: newSettings,
         error: insertError
     } =
-        await supabaseClient
+        await sessionRequest(context, context.client
             .from("user_settings")
             .insert({
+                user_id: context.userId,
                 currency_code: "EUR"
             })
             .select(`
                 id,
                 currency_code
             `)
-            .single();
+            .single());
 
 
     if (insertError) {
@@ -2208,67 +1937,56 @@ async function loadUserSettings() {
 }
 
 
-async function loadExpenses() {
-    const userId = currentUserId;
-    if (!userId) return;
-
-    const { data, error } =
-        await supabaseClient
+async function fetchAllExpenses(context) {
+    const pageSize = 500;
+    const expenses = [];
+    // Orden único y estable. Avanzar por filas recibidas también funciona si
+    // el límite configurado en la API es menor que pageSize.
+    while (true) {
+        const { data, error } = await sessionRequest(context, context.client
             .from("expenses")
-            .select(`
-                id,
-                expense_date,
-                amount,
-                category_id,
-                payment_method_id,
-                description,
-                merchant,
-                is_recurring,
-                note,
-                created_at,
-                categories (
-                    name,
-                    is_active
-                ),
-                payment_methods (
-                    name
-                )
-            `)
-            .order(
-                "expense_date",
-                {
-                    ascending: false
-                }
-            )
-            .order(
-                "created_at",
-                {
-                    ascending: false
-                }
-            );
-
-
-    if (currentUserId !== userId) return;
-
-    if (error) {
-
-        expenseMessage.textContent =
-            "Error cargando gastos: "
-            + error.message;
-
-        return;
+            .select(`id, expense_date, amount, category_id, payment_method_id,
+                description, merchant, is_recurring, note, created_at,
+                categories (name, is_active), payment_methods (name)`)
+            .eq("user_id", context.userId)
+            .order("expense_date", { ascending: false })
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false })
+            .range(expenses.length, expenses.length + pageSize - 1));
+        if (error) throw error;
+        if (data.length === 0) return expenses;
+        expenses.push(...data);
     }
-
-
-    allExpenses = data;
-
-    renderPaymentSpending();
-
-    renderRecentExpenses();
-
-    applyExpenseFilters();
 }
 
+async function loadExpenses(context = sessionContext) {
+    assertCurrentSession(context);
+    if (!context.userId) return false;
+    const requestId = ++expensesRequest;
+    try {
+        const expenses = await fetchAllExpenses(context);
+        assertCurrentSession(context);
+        if (requestId !== expensesRequest) return false;
+        allExpenses = expenses;
+        renderPaymentMethodOptions();
+        renderPaymentSpending();
+        renderRecentExpenses();
+        applyExpenseFilters();
+        return true;
+    } catch (error) {
+        if (!isCurrentSession(context)) throw new SessionChangedError();
+        if (requestId === expensesRequest) {
+            expenseMessage.textContent = "No se pudieron cargar todos los gastos. Recarga para intentarlo de nuevo.";
+        }
+        // No sustituir los datos completos anteriores por una página parcial.
+        throw error;
+    }
+}
+
+function expensesForMonth(month = getCurrentMonthRange()) {
+    return allExpenses.filter(expense => expense.expense_date >= month.startDate
+        && expense.expense_date < month.nextMonthDate);
+}
 
 function getPaymentMethodName(expense) {
     return expense.payment_methods?.name || "Sin método de pago";
@@ -3015,7 +2733,8 @@ function exportExpensesToCsv() {
 }
 
 
-async function loadDashboard() {
+async function loadDashboard(context = sessionContext) {
+    assertCurrentSession(context);
 
     const month =
         getCurrentMonthRange();
@@ -3027,33 +2746,7 @@ async function loadDashboard() {
     renderPaymentSpending(month);
 
 
-    const {
-        data: expenses,
-        error: expensesError
-    } =
-        await supabaseClient
-            .from("expenses")
-            .select("amount")
-            .gte(
-                "expense_date",
-                month.startDate
-            )
-            .lt(
-                "expense_date",
-                month.nextMonthDate
-            );
-
-
-    if (expensesError) {
-
-        console.error(
-            "Error cargando gastos del dashboard:",
-            expensesError
-        );
-
-        return;
-    }
-
+    const expenses = expensesForMonth(month);
 
     let spent = 0;
 
@@ -3069,14 +2762,14 @@ async function loadDashboard() {
         data: budget,
         error: budgetError
     } =
-        await supabaseClient
+        await sessionRequest(context, context.client
             .from("monthly_budgets")
             .select("amount")
             .eq(
                 "month_start",
                 month.startDate
             )
-            .maybeSingle();
+            .maybeSingle());
 
 
     if (budgetError) {
@@ -3139,48 +2832,14 @@ async function loadDashboard() {
 }
 
 
-async function loadMonthlyEvolution() {
+async function loadMonthlyEvolution(context = sessionContext) {
+    assertCurrentSession(context);
 
     const month =
         getCurrentMonthRange();
 
 
-    const {
-        data: expenses,
-        error
-    } =
-        await supabaseClient
-            .from("expenses")
-            .select(`
-                expense_date,
-                amount
-            `)
-            .gte(
-                "expense_date",
-                month.startDate
-            )
-            .lt(
-                "expense_date",
-                month.nextMonthDate
-            )
-            .order(
-                "expense_date",
-                {
-                    ascending: true
-                }
-            );
-
-
-    if (error) {
-
-        console.error(
-            "Error cargando evolución mensual:",
-            error
-        );
-
-        return;
-    }
-
+    const expenses = expensesForMonth(month);
 
     const now =
         new Date();
@@ -3301,7 +2960,8 @@ async function loadMonthlyEvolution() {
 }
 
 
-async function loadCategoryBudgets() {
+async function loadCategoryBudgets(context = sessionContext) {
+    assertCurrentSession(context);
     const userId = currentUserId;
     if (!userId) return false;
 
@@ -3313,7 +2973,7 @@ async function loadCategoryBudgets() {
         data: budgets,
         error: budgetsError
     } =
-        await supabaseClient
+        await sessionRequest(context, context.client
             .from("category_budgets")
             .select(`
                 amount,
@@ -3326,10 +2986,10 @@ async function loadCategoryBudgets() {
             .eq(
                 "month_start",
                 month.startDate
-            );
+            ));
 
 
-    if (currentUserId !== userId) return false;
+    if (!isCurrentSession(context)) return false;
 
     if (budgetsError) {
 
@@ -3342,38 +3002,7 @@ async function loadCategoryBudgets() {
     }
 
 
-    const {
-        data: expenses,
-        error: expensesError
-    } =
-        await supabaseClient
-            .from("expenses")
-            .select(`
-                amount,
-                category_id
-            `)
-            .gte(
-                "expense_date",
-                month.startDate
-            )
-            .lt(
-                "expense_date",
-                month.nextMonthDate
-            );
-
-
-    if (currentUserId !== userId) return false;
-
-    if (expensesError) {
-
-        console.error(
-            "Error cargando gastos por categoría:",
-            expensesError
-        );
-
-        return false;
-    }
-
+    const expenses = expensesForMonth(month);
 
     const spentByCategory =
         new Map();
@@ -3486,7 +3115,8 @@ async function loadCategoryBudgets() {
 }
 
 
-async function loadBudgetSettings({ preserveDraft = false } = {}) {
+async function loadBudgetSettings({ preserveDraft = false } = {}, context = sessionContext) {
+    assertCurrentSession(context);
     const userId = currentUserId;
     if (!userId) return false;
 
@@ -3500,17 +3130,17 @@ async function loadBudgetSettings({ preserveDraft = false } = {}) {
         data: monthlyBudgetData,
         error: monthlyBudgetError
     } =
-        await supabaseClient
+        await sessionRequest(context, context.client
             .from("monthly_budgets")
             .select("id, amount")
             .eq(
                 "month_start",
                 month.startDate
             )
-            .maybeSingle();
+            .maybeSingle());
 
 
-    if (currentUserId !== userId) return false;
+    if (!isCurrentSession(context)) return false;
 
     if (monthlyBudgetError) {
 
@@ -3529,15 +3159,15 @@ async function loadBudgetSettings({ preserveDraft = false } = {}) {
         data: categories,
         error: categoriesError
     } =
-        await supabaseClient
+        await sessionRequest(context, context.client
             .from("categories")
             .select("id, name")
             .eq("is_active", true)
             .eq("user_id", userId)
-            .order("name");
+            .order("name"));
 
 
-    if (currentUserId !== userId) return false;
+    if (!isCurrentSession(context)) return false;
 
     if (categoriesError) {
 
@@ -3556,7 +3186,7 @@ async function loadBudgetSettings({ preserveDraft = false } = {}) {
         data: budgets,
         error: budgetsError
     } =
-        await supabaseClient
+        await sessionRequest(context, context.client
             .from("category_budgets")
             .select(`
                 id,
@@ -3566,10 +3196,10 @@ async function loadBudgetSettings({ preserveDraft = false } = {}) {
             .eq(
                 "month_start",
                 month.startDate
-            );
+            ));
 
 
-    if (currentUserId !== userId) return false;
+    if (!isCurrentSession(context)) return false;
 
     if (budgetsError) {
 
@@ -3692,246 +3322,249 @@ async function loadBudgetSettings({ preserveDraft = false } = {}) {
 
 
 async function copyPreviousMonthBudgets() {
-    const userId = currentUserId;
-    if (!userId) return;
+    return runMutation(budgetForm, budgetMessage, async context => {
+        const userId = currentUserId;
+        if (!userId) return;
 
-    const currentMonth =
-        getCurrentMonthRange();
+        const currentMonth =
+            getCurrentMonthRange();
 
-    const previousMonthStart =
-        getPreviousMonthStart();
+        const previousMonthStart =
+            getPreviousMonthStart();
 
-
-    budgetMessage.textContent =
-        "Buscando presupuesto del mes anterior...";
-
-
-    // 1. Buscar presupuesto total anterior
-
-    const {
-        data: previousMonthlyBudget,
-        error: monthlyError
-    } =
-        await supabaseClient
-            .from("monthly_budgets")
-            .select("amount")
-            .eq(
-                "month_start",
-                previousMonthStart
-            )
-            .maybeSingle();
-
-
-    if (monthlyError) {
 
         budgetMessage.textContent =
-            "Error buscando el presupuesto anterior: "
-            + monthlyError.message;
-
-        return;
-    }
+            "Buscando presupuesto del mes anterior...";
 
 
-    // 2. Buscar presupuestos por categoría anteriores
-
-    const {
-        data: previousBudgets,
-        error: categoriesError
-    } =
-        await supabaseClient
-            .from("category_budgets")
-            .select(`
-                category_id,
-                amount,
-                categories (is_active)
-            `)
-            .eq(
-                "month_start",
-                previousMonthStart
-            );
-
-
-    if (categoriesError) {
-
-        budgetMessage.textContent =
-            "Error buscando los presupuestos anteriores: "
-            + categoriesError.message;
-
-        return;
-    }
-
-
-    if (currentUserId !== userId) return;
-    const previousCategoryBudgets = previousBudgets.filter(
-        budget => budget.categories?.is_active
-    );
-
-    // 3. Comprobar que realmente haya algo para copiar
-
-    if (
-        !previousMonthlyBudget
-        && previousCategoryBudgets.length === 0
-    ) {
-
-        budgetMessage.textContent =
-            "No hay presupuesto total ni presupuestos de categorías activas en el mes anterior para copiar.";
-
-        return;
-    }
-
-
-    // 4. Pedir confirmación
-
-    const confirmed =
-        window.confirm(
-            "Se copiarán el presupuesto total y los de categorías activas del mes anterior. "
-            + "Los presupuestos actuales que coincidan serán reemplazados. "
-            + "¿Quieres continuar?"
-        );
-
-
-    if (!confirmed) {
-
-        budgetMessage.textContent = "";
-
-        return;
-    }
-
-
-    budgetMessage.textContent =
-        "Copiando presupuestos...";
-
-
-    // 5. Copiar presupuesto mensual total
-
-    if (previousMonthlyBudget) {
+        // 1. Buscar presupuesto total anterior
 
         const {
-            data: currentMonthlyBudget,
-            error: currentMonthlyError
+            data: previousMonthlyBudget,
+            error: monthlyError
         } =
-            await supabaseClient
+            await sessionRequest(context, context.client
                 .from("monthly_budgets")
-                .select("id")
+                .select("amount")
                 .eq(
                     "month_start",
-                    currentMonth.startDate
+                    previousMonthStart
                 )
-                .maybeSingle();
+                .maybeSingle());
 
 
-        if (currentMonthlyError) {
+        if (monthlyError) {
 
             budgetMessage.textContent =
-                "Error revisando el presupuesto actual: "
-                + currentMonthlyError.message;
+                "Error buscando el presupuesto anterior: "
+                + monthlyError.message;
 
             return;
         }
 
 
-        if (currentMonthlyBudget) {
+        // 2. Buscar presupuestos por categoría anteriores
 
-            const { error } =
-                await supabaseClient
+        const {
+            data: previousBudgets,
+            error: categoriesError
+        } =
+            await sessionRequest(context, context.client
+                .from("category_budgets")
+                .select(`
+                    category_id,
+                    amount,
+                    categories (is_active)
+                `)
+                .eq(
+                    "month_start",
+                    previousMonthStart
+                ));
+
+
+        if (categoriesError) {
+
+            budgetMessage.textContent =
+                "Error buscando los presupuestos anteriores: "
+                + categoriesError.message;
+
+            return;
+        }
+
+
+        if (!isCurrentSession(context)) return;
+        const previousCategoryBudgets = previousBudgets.filter(
+            budget => budget.categories?.is_active
+        );
+
+        // 3. Comprobar que realmente haya algo para copiar
+
+        if (
+            !previousMonthlyBudget
+            && previousCategoryBudgets.length === 0
+        ) {
+
+            budgetMessage.textContent =
+                "No hay presupuesto total ni presupuestos de categorías activas en el mes anterior para copiar.";
+
+            return;
+        }
+
+
+        // 4. Pedir confirmación
+
+        const confirmed =
+            window.confirm(
+                "Se copiarán el presupuesto total y los de categorías activas del mes anterior. "
+                + "Los presupuestos actuales que coincidan serán reemplazados. "
+                + "¿Quieres continuar?"
+            );
+
+
+        if (!confirmed) {
+
+            budgetMessage.textContent = "";
+
+            return;
+        }
+
+
+        budgetMessage.textContent =
+            "Copiando presupuestos...";
+
+
+        // 5. Copiar presupuesto mensual total
+
+        if (previousMonthlyBudget) {
+
+            const {
+                data: currentMonthlyBudget,
+                error: currentMonthlyError
+            } =
+                await sessionRequest(context, context.client
                     .from("monthly_budgets")
-                    .update({
-                        amount:
-                            previousMonthlyBudget.amount
-                    })
+                    .select("id")
                     .eq(
-                        "id",
-                        currentMonthlyBudget.id
-                    );
+                        "month_start",
+                        currentMonth.startDate
+                    )
+                    .maybeSingle());
 
 
-            if (error) {
+            if (currentMonthlyError) {
 
                 budgetMessage.textContent =
-                    "Error copiando el presupuesto total: "
-                    + error.message;
+                    "Error revisando el presupuesto actual: "
+                    + currentMonthlyError.message;
 
                 return;
             }
 
-        } else {
 
-            const { error } =
-                await supabaseClient
-                    .from("monthly_budgets")
-                    .insert({
+            if (currentMonthlyBudget) {
+
+                const { error } =
+                    await sessionRequest(context, context.client
+                        .from("monthly_budgets")
+                        .update({
+                            amount:
+                                previousMonthlyBudget.amount
+                        })
+                        .eq(
+                            "id",
+                            currentMonthlyBudget.id
+                        ));
+
+
+                if (error) {
+
+                    budgetMessage.textContent =
+                        "Error copiando el presupuesto total: "
+                        + error.message;
+
+                    return;
+                }
+
+            } else {
+
+                const { error } =
+                    await sessionRequest(context, context.client
+                        .from("monthly_budgets")
+                        .insert({
+                            user_id: context.userId,
+                            month_start:
+                                currentMonth.startDate,
+
+                            amount:
+                                previousMonthlyBudget.amount
+                        }));
+
+
+                if (error) {
+
+                    budgetMessage.textContent =
+                        "Error copiando el presupuesto total: "
+                        + error.message;
+
+                    return;
+                }
+            }
+        }
+
+
+        // 6. Copiar presupuestos por categoría
+
+        if (
+            previousCategoryBudgets.length > 0
+        ) {
+
+            const budgetsToInsert =
+                previousCategoryBudgets.map(
+                    (budget) => ({
+                        user_id: userId,
                         month_start:
                             currentMonth.startDate,
 
+                        category_id:
+                            budget.category_id,
+
                         amount:
-                            previousMonthlyBudget.amount
-                    });
+                            budget.amount
+                    })
+                );
 
 
-            if (error) {
+            const { error: insertError } =
+                await sessionRequest(context, context.client
+                    .from("category_budgets")
+                    .upsert(budgetsToInsert, {
+                        onConflict: "user_id,month_start,category_id"
+                    }));
+
+
+            if (insertError) {
 
                 budgetMessage.textContent =
-                    "Error copiando el presupuesto total: "
-                    + error.message;
+                    "Error copiando los presupuestos por categoría: "
+                    + insertError.message;
 
                 return;
             }
         }
-    }
 
 
-    // 6. Copiar presupuestos por categoría
+        // 7. Actualizar la interfaz
 
-    if (
-        previousCategoryBudgets.length > 0
-    ) {
+        await loadDashboard(context);
 
-        const budgetsToInsert =
-            previousCategoryBudgets.map(
-                (budget) => ({
-                    user_id: userId,
-                    month_start:
-                        currentMonth.startDate,
+        await loadCategoryBudgets(context);
 
-                    category_id:
-                        budget.category_id,
-
-                    amount:
-                        budget.amount
-                })
-            );
+        await loadBudgetSettings({}, context);
 
 
-        const { error: insertError } =
-            await supabaseClient
-                .from("category_budgets")
-                .upsert(budgetsToInsert, {
-                    onConflict: "user_id,month_start,category_id"
-                });
-
-
-        if (insertError) {
-
-            budgetMessage.textContent =
-                "Error copiando los presupuestos por categoría: "
-                + insertError.message;
-
-            return;
-        }
-    }
-
-
-    // 7. Actualizar la interfaz
-
-    await loadDashboard();
-
-    await loadCategoryBudgets();
-
-    await loadBudgetSettings();
-
-
-    budgetMessage.textContent =
-        "Presupuesto del mes anterior copiado correctamente.";
+        budgetMessage.textContent =
+            "Presupuesto del mes anterior copiado correctamente.";
+    });
 }
 
 
@@ -3956,8 +3589,8 @@ function startEditingExpense(expense) {
     merchantInput.value =
         expense.merchant || "";
 
-    paymentMethodSelect.value =
-        expense.payment_method_id;
+    editingExpensePaymentMethodId = String(expense.payment_method_id);
+    renderPaymentMethodOptions(editingExpensePaymentMethodId);
 
     recurringInput.checked =
         expense.is_recurring;
@@ -3985,7 +3618,9 @@ function resetExpenseForm() {
         null;
 
     editingExpenseCategoryId = null;
+    editingExpensePaymentMethodId = null;
     expenseForm.reset();
+    renderPaymentMethodOptions("");
     renderExpenseCategoryOptions("");
 
     setTodayAsDefault();
@@ -3999,46 +3634,48 @@ function resetExpenseForm() {
 
 
 async function deleteExpense(expenseId) {
+    return runMutation(expenseForm, expenseMessage, async context => {
 
-    const confirmed =
-        window.confirm(
-            "¿Seguro que quieres eliminar este gasto?"
-        );
-
-
-    if (!confirmed) {
-        return;
-    }
+        const confirmed =
+            window.confirm(
+                "¿Seguro que quieres eliminar este gasto?"
+            );
 
 
-    const { error } =
-        await supabaseClient
-            .from("expenses")
-            .delete()
-            .eq("id", expenseId);
+        if (!confirmed) {
+            return;
+        }
 
 
-    if (error) {
+        const { error } =
+            await sessionRequest(context, context.client
+                .from("expenses")
+                .delete()
+                .eq("id", expenseId));
+
+
+        if (error) {
+
+            expenseMessage.textContent =
+                "Error al eliminar: "
+                + error.message;
+
+            return;
+        }
+
 
         expenseMessage.textContent =
-            "Error al eliminar: "
-            + error.message;
-
-        return;
-    }
+            "Gasto eliminado correctamente.";
 
 
-    expenseMessage.textContent =
-        "Gasto eliminado correctamente.";
+        await loadExpenses(context);
 
+        await loadDashboard(context);
 
-    await loadExpenses();
+        await loadMonthlyEvolution(context);
 
-    await loadDashboard();
-
-    await loadMonthlyEvolution();
-
-    await loadCategoryBudgets();
+        await loadCategoryBudgets(context);
+    });
 }
 
 
@@ -4111,7 +3748,7 @@ showInactivePaymentMethodsButton.addEventListener(
 
 paymentMethodForm.addEventListener(
     "submit",
-    async (event) => {
+    mutationHandler(paymentMethodForm, paymentMethodSettingsMessage, async (event, context) => {
 
         event.preventDefault();
 
@@ -4129,11 +3766,12 @@ paymentMethodForm.addEventListener(
 
 
         const { error } =
-            await supabaseClient
+            await sessionRequest(context, context.client
                 .from("payment_methods")
                 .insert({
+                    user_id: context.userId,
                     name: name
-                });
+                }));
 
 
         if (error) {
@@ -4153,16 +3791,16 @@ paymentMethodForm.addEventListener(
             "Método añadido correctamente.";
 
 
-        await loadPaymentMethods();
+        await loadPaymentMethods(context);
 
-        await loadPaymentMethodSettings();
-    }
+        await loadPaymentMethodSettings(context);
+    })
 );
 
 
 passwordForm.addEventListener(
     "submit",
-    async (event) => {
+    mutationHandler(passwordForm, passwordMessage, async (event, context) => {
 
         event.preventDefault();
 
@@ -4172,12 +3810,7 @@ passwordForm.addEventListener(
 
 
         const { error } =
-            await supabaseClient
-                .auth
-                .updateUser({
-                    password:
-                        newPassword
-                });
+            await updateSessionPassword(context, newPassword);
 
 
         if (error) {
@@ -4195,13 +3828,13 @@ passwordForm.addEventListener(
 
         passwordMessage.textContent =
             "Contraseña actualizada correctamente.";
-    }
+    })
 );
 
 
 budgetForm.addEventListener(
     "submit",
-    async (event) => {
+    mutationHandler(budgetForm, budgetMessage, async (event, context) => {
 
         event.preventDefault();
 
@@ -4234,7 +3867,7 @@ budgetForm.addEventListener(
         if (monthlyBudgetId) {
 
             const result =
-                await supabaseClient
+                await sessionRequest(context, context.client
                     .from("monthly_budgets")
                     .update({
                         amount: monthlyAmount
@@ -4242,7 +3875,7 @@ budgetForm.addEventListener(
                     .eq(
                         "id",
                         monthlyBudgetId
-                    );
+                    ));
 
             monthlyError =
                 result.error;
@@ -4250,15 +3883,16 @@ budgetForm.addEventListener(
         } else {
 
             const result =
-                await supabaseClient
+                await sessionRequest(context, context.client
                     .from("monthly_budgets")
                     .insert({
+                        user_id: context.userId,
                         month_start:
                             month.startDate,
 
                         amount:
                             monthlyAmount
-                    });
+                    }));
 
             monthlyError =
                 result.error;
@@ -4304,13 +3938,13 @@ budgetForm.addEventListener(
                 if (budgetId) {
 
                     const { error } =
-                        await supabaseClient
+                        await sessionRequest(context, context.client
                             .from("category_budgets")
                             .delete()
                             .eq(
                                 "id",
                                 budgetId
-                            );
+                            ));
 
 
                     if (error) {
@@ -4337,7 +3971,7 @@ budgetForm.addEventListener(
             if (budgetId) {
 
                 const { error } =
-                    await supabaseClient
+                    await sessionRequest(context, context.client
                         .from("category_budgets")
                         .update({
                             amount: amount
@@ -4345,7 +3979,7 @@ budgetForm.addEventListener(
                         .eq(
                             "id",
                             budgetId
-                        );
+                        ));
 
 
                 if (error) {
@@ -4364,9 +3998,10 @@ budgetForm.addEventListener(
             else {
 
                 const { error } =
-                    await supabaseClient
+                    await sessionRequest(context, context.client
                         .from("category_budgets")
                         .insert({
+                            user_id: context.userId,
 
                             month_start:
                                 month.startDate,
@@ -4376,7 +4011,7 @@ budgetForm.addEventListener(
 
                             amount:
                                 amount
-                        });
+                        }));
 
 
                 if (error) {
@@ -4395,18 +4030,18 @@ budgetForm.addEventListener(
             "Presupuestos guardados correctamente.";
 
 
-        await loadDashboard();
+        await loadDashboard(context);
 
-        await loadCategoryBudgets();
+        await loadCategoryBudgets(context);
 
-        await loadBudgetSettings();
-    }
+        await loadBudgetSettings({}, context);
+    })
 );
 
 
 expenseForm.addEventListener(
     "submit",
-    async (event) => {
+    mutationHandler(expenseForm, expenseMessage, async (event, context) => {
 
         event.preventDefault();
 
@@ -4422,7 +4057,15 @@ expenseForm.addEventListener(
             return;
         }
 
+        const method = allPaymentMethods.find(item => String(item.id) === paymentMethodSelect.value);
+        const keepingMethod = editingExpenseId !== null
+            && paymentMethodSelect.value === editingExpensePaymentMethodId;
+        if (!method || (!method.is_active && !keepingMethod)) {
+            expenseMessage.textContent = "Selecciona un método activo o conserva el método original.";
+            return;
+        }
         const expense = {
+            user_id: context.userId,
 
             expense_date:
                 expenseDate.value,
@@ -4456,19 +4099,19 @@ expenseForm.addEventListener(
         if (editingExpenseId === null) {
 
             const result =
-                await supabaseClient
+                await sessionRequest(context, context.client
                     .from("expenses")
-                    .insert(expense);
+                    .insert(expense));
 
             error = result.error;
 
         } else {
 
             const result =
-                await supabaseClient
+                await sessionRequest(context, context.client
                     .from("expenses")
                     .update(expense)
-                    .eq("id", editingExpenseId);
+                    .eq("id", editingExpenseId));
 
             error = result.error;
         }
@@ -4495,102 +4138,65 @@ expenseForm.addEventListener(
         }
 
 
-        await loadExpenses();
+        await loadExpenses(context);
 
-        await loadDashboard();
+        await loadDashboard(context);
 
-        await loadMonthlyEvolution();
+        await loadMonthlyEvolution(context);
 
-        await loadCategoryBudgets();
+        await loadCategoryBudgets(context);
 
         resetExpenseForm();
 
         showView("home");
-    }
+    })
 );
 
 
-logoutButton.addEventListener("click", async () => {
-
+async function signOutCurrentUser() {
+    if (logoutInProgress) return false;
+    logoutInProgress = true;
     clearCategoryState();
-
-    await supabaseClient.auth.signOut();
-
-    appSection.hidden = true;
-    loginSection.hidden = false;
-
-    registerContainer.hidden =
-        true;
-    
-    forgotPasswordContainer.hidden =
-        true;
-
-    newPasswordContainer.hidden =
-        true;
-
-    loginForm.hidden =
-        false;
-
-    showRegisterButton.hidden =
-        false;
-    
-    forgotPasswordButton.hidden =
-        false;
-
-    loginMessage.hidden =
-        false;
-
-});
-
-
-async function initializeApp() {
-
-    const isPasswordRecovery =
-        new URLSearchParams(
-            window.location.search
-        ).get("recovery")
-        === "1";
-
-
-    const {
-        data: { session }
-    } =
-        await supabaseClient
-            .auth
-            .getSession();
-
-
-    if (isPasswordRecovery) {
-
-        if (session) {
-
-            showPasswordRecoveryScreen();
-
-        } else {
-
-            loginMessage.textContent =
-                "El enlace de recuperación no es válido o ha caducado. Solicita uno nuevo.";
-
-
-            window.history.replaceState(
-                {},
-                document.title,
-                window.location.pathname
-            );
+    showLoginScreen();
+    const context = sessionContext;
+    loginMessage.textContent = "Cerrando sesión...";
+    try {
+        const { error } = await supabaseClient.auth.signOut();
+        if (error) throw error;
+        if (!sessionContext.userId) loginMessage.textContent = "";
+        return true;
+    } catch {
+        if (isCurrentSession(context) || !sessionContext.userId) {
+            loginMessage.textContent = "No se pudo cerrar la sesión. Comprueba la conexión y recarga para intentarlo de nuevo.";
         }
-
-
-        return;
-    }
-
-
-    if (session) {
-
-        showApp(
-            session.user
-        );
+        return false;
+    } finally {
+        logoutInProgress = false;
     }
 }
+
+logoutButton.addEventListener("click", signOutCurrentUser);
+
+supabaseClient.auth.onAuthStateChange((event, session) => {
+    applyAuthSession(session, event);
+});
+
+async function initializeApp() {
+    const context = sessionContext;
+    try {
+        const { data: { session }, error } = await supabaseClient.auth.getSession();
+        if (!isCurrentSession(context)) return;
+        if (error) throw error;
+        applyAuthSession(session);
+        if (!session && new URLSearchParams(window.location.search).get("recovery") === "1") {
+            loginMessage.textContent = "El enlace de recuperación no es válido o ha caducado. Solicita uno nuevo.";
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    } catch {
+        if (isCurrentSession(context)) loginMessage.textContent = "No se pudo comprobar la sesión. Recarga para intentarlo de nuevo.";
+    }
+}
+
 
 
 if (

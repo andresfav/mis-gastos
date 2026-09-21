@@ -1,0 +1,84 @@
+const logs=[];
+const assert=(ok,message)=>{if(!ok)throw new Error(message);logs.push('OK: '+message);};
+const tick=()=>new Promise(r=>setTimeout(r,0));
+const rows=()=>[...paymentSpendingList.querySelectorAll('.payment-spending-row')];
+const names=()=>rows().map(r=>r.querySelector('.payment-spending-name').textContent);
+const total=()=>paymentSpendingTotal.textContent;
+const fixture=(id,amount,method,day)=>({id,user_id:'A',category_id:1,amount,expense_date:day,payment_method_id:method,description:'Gasto '+id,merchant:'Local',note:null,is_recurring:false,created_at:day});
+(async()=>{
+try{
+ const range=getCurrentMonthRange();
+ const initial=[fixture(1,'200',1,range.startDate),fixture(2,'220',1,range.startDate),fixture(3,'210',2,range.startDate),fixture(4,'70',3,range.startDate),fixture(5,'999',1,previous),fixture(6,'888',2,range.nextMonthDate)];
+ db.expenses=structuredClone(initial);
+ await showMockApp({id:'A',email:'a@example.test'});
+ assert(paymentSpendingContent.hidden && paymentSpendingToggle.getAttribute('aria-expanded')==='false','Sección plegada inicialmente');
+ assert(total()===formatCurrency(700),'Total del mes 700; excluye anterior y límite del próximo mes');
+ assert(names().join('|')==='Tarjeta|Efectivo|Transferencia','Agrupa por método y ordena 420, 210, 70');
+ assert(rows().map(r=>r.querySelector('.payment-spending-values span').textContent).join('|')==='60 %|30 %|10 %','Porcentajes 60, 30 y 10');
+ assert(rows().map(r=>r.querySelector('progress').value).join('|')==='60|30|10','Barras proporcionales');
+ assert(!names().includes('Sin uso'),'No muestra métodos sin gastos');
+ assert(![...paymentMethodSelect.options].some(o=>o.value==='2') && names().includes('Efectivo'),'Incluye el método inactivo ausente del selector');
+ assert(db.payment_methods.find(m=>m.id===2).is_active===false && !writes.some(w=>w.table==='payment_methods'),'No restaura ni escribe métodos de pago');
+ const queryCount=reads.length;
+ paymentSpendingToggle.click();
+ assert(!paymentSpendingContent.hidden && paymentSpendingToggle.getAttribute('aria-expanded')==='true' && paymentSpendingArrow.textContent==='▲','Abrir sincroniza contenido, flecha y aria-expanded');
+ historySearch.value='texto sin coincidencias'; applyExpenseFilters();
+ assert(currentFilteredExpenses.length===0 && total()===formatCurrency(700),'Filtros del historial no alteran distribución');
+ renderPaymentSpending();
+ assert(reads.length===queryCount,'Renderizar y desplegar no hacen consultas');
+ historySearch.value='';applyExpenseFilters();
+
+ resetExpenseForm();expenseDate.value=range.startDate;amountInput.value='100';categorySelect.value='1';descriptionInput.value='Nuevo';paymentMethodSelect.value='1';
+ expenseForm.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await tick();await tick();
+ assert(total()===formatCurrency(800),'Crear gasto actualiza la distribución');
+ assert(!paymentSpendingContent.hidden,'Actualizaciones conservan sección abierta');
+ const exp=allExpenses.find(e=>e.id===1); startEditingExpense(exp);amountInput.value='100';paymentMethodSelect.value='3';
+ expenseForm.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await tick();await tick();
+ assert(total()===formatCurrency(700),'Editar importe actualiza total');
+ assert(rows().find(r=>r.textContent.includes('Transferencia')).textContent.includes(formatCurrency(170)),'Cambiar método redistribuye su gasto');
+ await deleteExpense(3);
+ assert(total()===formatCurrency(490) && !names().includes('Efectivo'),'Eliminar último gasto del método quita su fila');
+ currencySelect.value='USD';currencySelect.dispatchEvent(new Event('change'));await tick();await tick();
+ assert(total().startsWith('US$') && rows().every(r=>r.querySelector('strong').textContent.startsWith('US$')),'Cambio a USD actualiza total y filas');
+ currencySelect.value='PYG';currencySelect.dispatchEvent(new Event('change'));await tick();await tick();
+ assert(total().startsWith('Gs.') && rows().every(r=>r.querySelector('strong').textContent.startsWith('Gs.')),'Cambio a PYG respeta formato');
+ currentCurrency='EUR';
+
+ db.expenses.push(fixture(8,10,null,range.startDate),fixture(9,20,99,range.startDate));await loadExpenses();
+ assert(names().filter(n=>n==='Sin método de pago').length===1 && rows().find(r=>r.textContent.includes('Sin método de pago')).textContent.includes(formatCurrency(30)),'Agrupa referencias ausentes como Sin método de pago');
+ assert(expenseTableBody.textContent.includes('Sin método de pago'),'Un método ausente no rompe la carga del historial');
+ db.payment_methods.push({id:5,user_id:'A',name:'Tarjeta',is_active:true});db.expenses.push(fixture(10,7,5,range.startDate));await loadExpenses();
+ assert(names().filter(n=>n==='Tarjeta').length===2,'Métodos distintos con igual nombre no se mezclan');
+ db.expenses=[fixture(1,1,1,range.startDate),fixture(2,2,3,range.startDate)];await loadExpenses();
+ assert(rows()[0].querySelector('.payment-spending-values span').textContent==='66,7 %','Porcentaje legible con un decimal');
+ db.expenses=[fixture(5,999,1,previous),fixture(6,888,2,range.nextMonthDate)];await loadExpenses();
+ assert(total()===formatCurrency(0) && rows().length===0 && paymentSpendingList.textContent.includes('Todavía no hay'),'Mes vacío sin barras ficticias aunque haya historial');
+ const realMonth=getCurrentMonthRange;
+ getCurrentMonthRange=()=>({startDate:range.nextMonthDate,nextMonthDate:'9999-12-31',label:'Mes siguiente'});
+ await loadDashboard();
+ assert(total()===formatCurrency(888) && names()[0]==='Efectivo','Al recalcular el mes del dashboard usa el nuevo rango');
+ getCurrentMonthRange=realMonth;
+ db.expenses=[fixture(1,0,1,range.startDate)];await loadExpenses();
+ assert(rows()[0].querySelector('progress').value===0 && !paymentSpendingList.textContent.includes('NaN'),'Total cero no divide entre cero');
+ db.expenses=[fixture(1,100,1,range.startDate),fixture(2,-50,3,range.startDate)];await loadExpenses();
+ assert(rows().every(r=>r.querySelector('progress').value>=0 && r.querySelector('progress').value<=100),'Barras limitadas entre 0 y 100 incluso ante importes atípicos');
+ db.expenses=structuredClone(initial);db.payment_methods[0].name='<img src=x onerror=alert(1)>';await loadExpenses();
+ assert(!paymentSpendingList.querySelector('img'),'Nombres se muestran como texto');
+ db.payment_methods[0].name='Método de pago con un nombre muy largo '.repeat(10);await loadExpenses();
+ assert(paymentSpendingList.scrollWidth<=paymentSpendingList.clientWidth,'Nombres largos no desbordan');
+ clearCategoryState();
+ assert(rows().length===0 && total()===formatCurrency(0) && paymentSpendingContent.hidden,'Cerrar sesión limpia distribución y colapsa sección');
+ mockUser='B';await showMockApp({id:'B',email:'b@example.test'});
+ assert(rows().length===0 && total()===formatCurrency(0),'Otra cuenta no conserva distribución del usuario anterior');
+ mockUser='A';db.payment_methods[0].name='Tarjeta';await showMockApp({id:'A',email:'a@example.test'});
+ showView('home');paymentSpendingToggle.click();
+ window.scrollTo({top:document.getElementById('payment-spending-section').offsetTop-12,behavior:'instant'});
+ const section=document.getElementById('payment-spending-section');
+ assert(section.scrollWidth<=section.clientWidth,'Sección cabe en viewport móvil');
+ assert(rows().every(r=>r.querySelector('progress').getAttribute('aria-label')),'Barras con etiqueta accesible');
+ // Chrome no expone de forma fiable el estilo calculado de esta parte nativa.
+ // El color de las barras se verifica en la captura mobile.png.
+ document.title='TESTS PASSED';
+}catch(error){logs.push('FAIL: '+error.stack);document.title='TESTS FAILED';}
+const out=document.createElement('pre');out.id='test-results';out.hidden=true;out.textContent=logs.join('\n');document.body.append(out);
+})();

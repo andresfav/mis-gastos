@@ -788,6 +788,33 @@ button:active {
     gap: 8px;
 }
 
+#payment-method-form > label {
+    grid-column: 1 / -1;
+}
+
+#payment-method-form {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.payment-method-setting-row > span,
+.budget-input-row > label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.payment-method-setting-row > span {
+    flex: 1;
+}
+
+.payment-method-setting-row button {
+    flex-shrink: 0;
+}
+
+button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
 
 .payment-method-setting-row {
     display: flex;
